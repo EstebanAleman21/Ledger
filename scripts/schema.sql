@@ -1,0 +1,101 @@
+-- Ledger Finance Tracker - Google Sheets Schema
+-- Sheets are used for transaction import (input) and DB export snapshots (read-only).
+
+-- ============================================
+-- IMPORT TAB (Transactions)
+-- ============================================
+-- This is the only input tab. Each row is imported into the database.
+-- Column A: date (string) - YYYY-MM-DD
+-- Column B: description (string)
+-- Column C: type (string) - income | expense
+-- Column D: amount (number)
+-- Column E: category (string) - dropdown from export_categories (Name (type))
+-- Column F: account (string) - dropdown from export_accounts (Name (type))
+-- Column G: currency (string) - MXN | USD
+
+-- ============================================
+-- EXPORT TABS (read-only snapshots)
+-- ============================================
+-- export_transactions
+-- Column A: id (string)
+-- Column B: date (string)
+-- Column C: description (string)
+-- Column D: amount (number)
+-- Column E: type (string)
+-- Column F: category_id (string)
+-- Column G: account_id (string)
+-- Column H: to_account_id (string)
+-- Column I: currency (string)
+-- Column J: converted_amount (number)
+-- Column K: conversion_rate (number)
+-- Column L: tags (string)
+-- Column M: notes (string)
+-- Column N: needs_review (boolean)
+-- Column O: import_hash (string)
+-- Column P: source (string) - app | sheet
+-- Column Q: created_at (string)
+-- Column R: updated_at (string)
+
+-- export_accounts
+-- Column A: id (string)
+-- Column B: label (string) - Name (type) for dropdowns
+-- Column C: name (string)
+-- Column D: type (string)
+-- Column E: currency (string)
+-- Column F: balance (number)
+-- Column G: opening_balance (number)
+-- Column H: credit_limit (number)
+-- Column I: color (string)
+-- Column J: icon (string)
+-- Column K: created_at (string)
+-- Column L: updated_at (string)
+
+-- export_categories
+-- Column A: id (string)
+-- Column B: label (string) - Name (type) for dropdowns
+-- Column C: name (string)
+-- Column D: icon (string)
+-- Column E: color (string)
+-- Column F: parent_id (string)
+-- Column G: type (string) - income | expense | both
+-- Column H: budget (number)
+-- Column I: created_at (string)
+-- Column J: updated_at (string)
+
+-- export_budgets
+-- Column A: id (string)
+-- Column B: category_id (string)
+-- Column C: month (string) - YYYY-MM
+-- Column D: amount (number)
+-- Column E: rollover (boolean)
+-- Column F: rollover_amount (number)
+-- Column G: created_at (string)
+-- Column H: updated_at (string)
+
+-- export_rates
+-- Column A: id (string)
+-- Column B: from_currency (string)
+-- Column C: to_currency (string)
+-- Column D: rate (number)
+-- Column E: date (string)
+-- Column F: source (string)
+-- Column G: created_at (string)
+-- Column H: updated_at (string)
+
+-- export_settings
+-- Column A: key (string)
+-- Column B: value (string)
+-- Expected keys:
+--   - base_currency: MXN | USD
+--   - date_format: YYYY-MM-DD | MM/DD/YYYY | DD/MM/YYYY
+--   - default_account_id: string
+--   - auto_sync_enabled: true | false
+
+-- export_rules
+-- Column A: id (string)
+-- Column B: category_id (string)
+-- Column C: field (string) - description | amount | tags
+-- Column D: operator (string) - contains | equals | startsWith | endsWith | greaterThan | lessThan
+-- Column E: value (string)
+-- Column F: created_at (string)
+-- Column G: updated_at (string)
