@@ -57,7 +57,9 @@ USE_SHEETS = SHEETS_AVAILABLE and GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET
 app = FastAPI(
     title="Ledger Finance Tracker API",
     description="Personal finance tracker with Google Sheets backend",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url="/docs",
+    redoc_url="/redoc"
 )
 
 # CORS middleware
