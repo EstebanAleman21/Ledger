@@ -46,7 +46,7 @@ except ImportError as e:
 # Environment variables
 GOOGLE_CLIENT_ID = os.getenv('GOOGLE_CLIENT_ID', '')
 GOOGLE_CLIENT_SECRET = os.getenv('GOOGLE_CLIENT_SECRET', '')
-GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI', 'http://localhost:3000/api/auth/callback')
+GOOGLE_REDIRECT_URI = os.getenv('GOOGLE_REDIRECT_URI')
 
 print(f"Google Sheets config: CLIENT_ID={'set' if GOOGLE_CLIENT_ID else 'missing'}, SECRET={'set' if GOOGLE_CLIENT_SECRET else 'missing'}, SHEETS_AVAILABLE={SHEETS_AVAILABLE}")
 
