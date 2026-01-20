@@ -111,6 +111,8 @@ def parse_block(account_id: str, csv_block: str) -> List[InstallmentRow]:
         raise ValueError(f"Unexpected header: {lines[0]!r}")
     out: List[InstallmentRow] = []
     for line in lines[1:]:
+        if line.lower().startswith("description,amount,months_total"):
+            continue
         (
             description,
             amount,
@@ -151,6 +153,24 @@ Tecmilenio Ago-Dic,10000.00,3,1,false,0,2025-11-13
 Tecmileio Ago-Dic 2,1012.32,3,1,false,0,2025-11-14
 Pandora,3340.00,6,4,false,0,2025-12-04
 """,
+    "38167391-578a-4493-a433-2374df72fe67": """
+description,amount,months_total,months_remaining,has_interest,interest_amount_per_month,purchase_date
+PLAN DE PAGOS DIFERIDOS,6377.40,12,1,true,221.93,2026-03-01
+PLAN DE PAGOS DIFERIDOS,10099.00,9,6,true,351.45,2025-10-24
+description,amount,months_total,months_remaining,has_interest,interest_amount_per_month,purchase_date
+MACSTORE NUEVO SUR MONTERREY,25999.00,15,3,false,0,2025-02-16
+AMAZON MX MSI MKT*AMAZO,273.64,12,2,false,0,2025-03-21
+AMAZON MX MSI MKT*AMAZO,294.76,12,2,false,0,2025-03-21
+AMAZON MX MSI RETAIL,8999.08,12,2,false,0,2025-03-21
+AMAZON MX MSI MKT*AMAZO,408.03,12,2,false,0,2025-03-21
+AMAZON MX MSI RETAIL,11324.53,12,3,false,0,2025-04-20
+MACSTORE PABELLON M MONTERREY,22999.00,15,6,false,0,2025-05-03
+AMAZON MX MSI RETAIL,4057.00,12,4,false,0,2025-05-28
+MACSTORE NUEVO SUR MONTERREY,5499.00,15,11,false,0,2025-09-20
+VIVAAEROBUS,7384.87,9,5,false,0,2025-10-14
+VIVAAEROBUS WEB APODACA,2093.01,3,0,false,0,2025-11-05
+UGG PUNTO VALLE SAN PEDRO,9180.00,9,8,false,0,2025-12-23
+""",
 }
 
 
@@ -186,14 +206,55 @@ def main():
         for r in rows
     ]
 
-    result = client.table("installments").insert(payload).execute()
+    # Dedupe: skip rows already present (account + description + amount + months_total + purchase_date)
+    account_ids = sorted(set(DATASETS.keys()))
+    existing_result = (
+        client.table("installments")
+        .select("account_id,description,amount,months_total,purchase_date")
+        .in_("account_id", account_ids)
+        .execute()
+    )
+    if getattr(existing_result, "error", None):
+        raise SystemExit(f"Failed to read existing installments: {existing_result.error}")
+    existing_rows = getattr(existing_result, "data", None) or []
+    existing_keys = set()
+    for row in existing_rows:
+        existing_keys.add(
+            (
+                str(row.get("account_id")),
+                str(row.get("description") or "").strip().lower(),
+                float(row.get("amount") or 0),
+                int(row.get("months_total") or 0),
+                str(row.get("purchase_date") or ""),
+            )
+        )
+
+    deduped_payload = []
+    skipped = 0
+    for item in payload:
+        key = (
+            str(item.get("account_id")),
+            str(item.get("description") or "").strip().lower(),
+            float(item.get("amount") or 0),
+            int(item.get("months_total") or 0),
+            str(item.get("purchase_date") or ""),
+        )
+        if key in existing_keys:
+            skipped += 1
+            continue
+        deduped_payload.append(item)
+
+    if not deduped_payload:
+        print(f"No new rows to insert (skipped {skipped} duplicates).")
+        return
+
+    result = client.table("installments").insert(deduped_payload).execute()
     if getattr(result, "error", None):
         raise SystemExit(f"Insert failed: {result.error}")
 
     inserted = getattr(result, "data", None) or []
-    print(f"Inserted {len(inserted)} installment rows into Supabase.")
+    print(f"Inserted {len(inserted)} installment rows into Supabase (skipped {skipped} duplicates).")
 
 
 if __name__ == "__main__":
     main()
-

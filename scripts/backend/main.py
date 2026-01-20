@@ -735,6 +735,7 @@ async def sync_push():
         rates = store.list_rates()
         rules = store.list_rules()
         settings = store.list_settings()
+        installments = store.list_installments()
 
         accounts_with_balances = apply_computed_account_balances(accounts, transactions)
 
@@ -748,6 +749,76 @@ async def sync_push():
             label = f"{category.get('name')} ({category.get('type')})"
             export_categories.append({**category, "label": label})
 
+        # Debt tracker exports (derived)
+        installment_monthly_by_account: Dict[str, float] = {}
+        installment_remaining_by_account: Dict[str, float] = {}
+        for inst in installments:
+            account_id = inst.get("account_id")
+            if not account_id:
+                continue
+            months_total = float(inst.get("months_total") or 1)
+            months_remaining = float(inst.get("months_remaining") or 0)
+            if months_remaining <= 0:
+                continue
+            amount = float(inst.get("amount") or 0)
+            monthly_principal = amount / max(1.0, months_total)
+            monthly_interest = float(inst.get("interest_amount_per_month") or 0) if inst.get("has_interest") else 0.0
+            monthly_expected = monthly_principal + monthly_interest
+            installment_monthly_by_account[account_id] = installment_monthly_by_account.get(account_id, 0.0) + monthly_expected
+            installment_remaining_by_account[account_id] = installment_remaining_by_account.get(account_id, 0.0) + (monthly_expected * months_remaining)
+
+        export_debt_accounts = []
+        debt_summary_by_currency: Dict[str, Dict[str, float]] = {}
+        for account in accounts_with_balances:
+            if account.get("type") != "credit":
+                continue
+            currency = account.get("currency") or "MXN"
+            balance = float(account.get("balance") or 0)
+            debt_amount = max(0.0, -balance)
+            credit_limit = account.get("credit_limit")
+            remaining_credit = None
+            try:
+                if credit_limit is not None and str(credit_limit) != "":
+                    remaining_credit = float(credit_limit) + balance
+            except (TypeError, ValueError):
+                remaining_credit = None
+
+            monthly_expected = installment_monthly_by_account.get(account.get("id"), 0.0)
+            remaining_installments = installment_remaining_by_account.get(account.get("id"), 0.0)
+
+            export_debt_accounts.append({
+                "account_id": account.get("id"),
+                "account_name": account.get("name"),
+                "currency": currency,
+                "balance": balance,
+                "debt_amount": debt_amount,
+                "credit_limit": credit_limit,
+                "remaining_credit": remaining_credit,
+                "installment_monthly_expected": monthly_expected,
+                "installment_remaining_balance": remaining_installments,
+                "updated_at": now_iso(),
+            })
+
+            summary = debt_summary_by_currency.setdefault(str(currency), {
+                "total_credit_debt": 0.0,
+                "total_installment_remaining": 0.0,
+                "total_installment_monthly_expected": 0.0,
+            })
+            summary["total_credit_debt"] += debt_amount
+            summary["total_installment_remaining"] += remaining_installments
+            summary["total_installment_monthly_expected"] += monthly_expected
+
+        export_debt_summary = []
+        for currency, summary in sorted(debt_summary_by_currency.items()):
+            export_debt_summary.append({
+                "currency": currency,
+                "total_credit_debt": summary["total_credit_debt"],
+                "total_installment_remaining": summary["total_installment_remaining"],
+                "total_installment_monthly_expected": summary["total_installment_monthly_expected"],
+                "total_debt_combined": summary["total_credit_debt"] + summary["total_installment_remaining"],
+                "updated_at": now_iso(),
+            })
+
         sheets_service.write_export_tab('export_transactions', transactions)
         sheets_service.write_export_tab('export_accounts', export_accounts)
         sheets_service.write_export_tab('export_categories', export_categories)
@@ -755,6 +826,9 @@ async def sync_push():
         sheets_service.write_export_tab('export_rates', rates)
         sheets_service.write_export_tab('export_rules', rules)
         sheets_service.write_export_tab('export_settings', settings)
+        sheets_service.write_export_tab('export_installments', installments)
+        sheets_service.write_export_tab('export_debt_accounts', export_debt_accounts)
+        sheets_service.write_export_tab('export_debt_summary', export_debt_summary)
 
         user_session['last_synced_at'] = now_iso()
         return {
@@ -766,7 +840,8 @@ async def sync_push():
                 "categories": len(categories),
                 "budgets": len(budgets),
                 "rates": len(rates),
-                "rules": len(rules)
+                "rules": len(rules),
+                "installments": len(installments)
             }
         }
     except Exception as e:

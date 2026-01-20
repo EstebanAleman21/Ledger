@@ -31,6 +31,9 @@ EXPORT_TABS = {
     'export_rates': 'export_rates',
     'export_settings': 'export_settings',
     'export_rules': 'export_rules',
+    'export_installments': 'export_installments',
+    'export_debt_accounts': 'export_debt_accounts',
+    'export_debt_summary': 'export_debt_summary',
 }
 
 # Column mappings for import tab (matching schema.sql)
@@ -54,6 +57,13 @@ EXPORT_COLUMNS = {
                      'created_at', 'updated_at'],
     'export_settings': ['key', 'value'],
     'export_rules': ['id', 'category_id', 'field', 'operator', 'value', 'created_at', 'updated_at'],
+    'export_installments': ['id', 'account_id', 'description', 'amount', 'months_total', 'months_remaining',
+                            'has_interest', 'interest_amount_per_month', 'purchase_date', 'created_at', 'updated_at'],
+    'export_debt_accounts': ['account_id', 'account_name', 'currency', 'balance', 'debt_amount', 'credit_limit',
+                             'remaining_credit', 'installment_monthly_expected', 'installment_remaining_balance',
+                             'updated_at'],
+    'export_debt_summary': ['currency', 'total_credit_debt', 'total_installment_remaining',
+                            'total_installment_monthly_expected', 'total_debt_combined', 'updated_at'],
 }
 
 class SheetsService:
