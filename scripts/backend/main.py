@@ -171,6 +171,9 @@ class Account(BaseModel):
     balance: float = 0
     opening_balance: float = 0
     credit_limit: Optional[float] = None
+    remaining_credit: Optional[float] = None
+    installment_principal_remaining: float = 0
+    remaining_credit_after_installments: Optional[float] = None
     color: str = "#6b7280"
     icon: str = "wallet"
     created_at: Optional[str] = None
@@ -404,6 +407,53 @@ def apply_computed_account_balances(
     for acc in accounts:
         acc_id = acc.get("id")
         computed.append({**acc, "balance": balances.get(acc_id, 0)})
+    return computed
+
+
+def compute_credit_account_availability(
+    accounts: List[Dict[str, Any]],
+    installments: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    principal_remaining_by_account: Dict[str, float] = {}
+    for inst in installments:
+        account_id = inst.get("account_id")
+        if not account_id:
+            continue
+        months_remaining = float(inst.get("months_remaining") or 0)
+        if months_remaining <= 0:
+            continue
+        months_total = float(inst.get("months_total") or 1)
+        amount = float(inst.get("amount") or 0)
+        monthly_principal = amount / max(1.0, months_total)
+        principal_remaining_by_account[account_id] = principal_remaining_by_account.get(account_id, 0.0) + (
+            monthly_principal * months_remaining
+        )
+
+    computed: List[Dict[str, Any]] = []
+    for acc in accounts:
+        if acc.get("type") != "credit":
+            computed.append(acc)
+            continue
+
+        balance = float(acc.get("balance") or 0)
+        credit_limit = acc.get("credit_limit")
+        remaining_credit = None
+        try:
+            if credit_limit is not None and str(credit_limit).strip() != "":
+                remaining_credit = float(credit_limit) + balance
+        except (TypeError, ValueError):
+            remaining_credit = None
+
+        installment_principal_remaining = principal_remaining_by_account.get(acc.get("id"), 0.0)
+        remaining_after = None if remaining_credit is None else remaining_credit - installment_principal_remaining
+
+        computed.append({
+            **acc,
+            "remaining_credit": remaining_credit,
+            "installment_principal_remaining": installment_principal_remaining,
+            "remaining_credit_after_installments": remaining_after,
+        })
+
     return computed
 
 
@@ -1103,7 +1153,9 @@ async def get_accounts():
     """Get all accounts"""
     accounts = store.list_accounts()
     transactions = store.list_transactions({})
+    installments = store.list_installments()
     accounts_with_balances = apply_computed_account_balances(accounts, transactions)
+    accounts_with_balances = compute_credit_account_availability(accounts_with_balances, installments)
     return [Account(**row) for row in accounts_with_balances]
 
 @app.post("/accounts", response_model=Account)

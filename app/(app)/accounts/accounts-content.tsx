@@ -175,7 +175,12 @@ export function AccountsContent() {
             const IconComponent = accountTypeIcons[account.type]
             const isCredit = account.type === "credit"
             const creditLimit = coerceNumber(account.creditLimit)
-            const availableCredit = isCredit && creditLimit !== null ? creditLimit + account.balance : null
+            const availableCredit =
+              account.remainingCredit ?? (isCredit && creditLimit !== null ? creditLimit + account.balance : null)
+            const installmentPrincipalRemaining = account.installmentPrincipalRemaining ?? 0
+            const availableAfterInstallments =
+              account.remainingCreditAfterInstallments ??
+              (availableCredit === null ? null : availableCredit - installmentPrincipalRemaining)
 
             return (
               <Card
@@ -235,9 +240,14 @@ export function AccountsContent() {
                     >
                       {formatCurrency(account.balance, account.currency)}
                     </p>
-                    {availableCredit !== null && (
+                    {availableAfterInstallments !== null && (
                       <p className="text-sm text-muted-foreground">
-                        {formatCurrency(availableCredit, account.currency)} available
+                        {formatCurrency(availableAfterInstallments, account.currency)} available (after installments)
+                      </p>
+                    )}
+                    {isCredit && installmentPrincipalRemaining > 0 && (
+                      <p className="text-xs text-muted-foreground">
+                        Installments: {formatCurrency(installmentPrincipalRemaining, account.currency)}
                       </p>
                     )}
                   </div>
@@ -301,13 +311,27 @@ export function AccountsContent() {
                     </p>
                   )}
                   {selectedAccount.type === "credit" && coerceNumber(selectedAccount.creditLimit) !== null && (
-                    <p className="text-sm text-muted-foreground mt-1">
-                      Available:{" "}
-                      {formatCurrency(
-                        (coerceNumber(selectedAccount.creditLimit) as number) + selectedAccount.balance,
-                        selectedAccount.currency,
-                      )}
-                    </p>
+                    (() => {
+                      const creditLimit = coerceNumber(selectedAccount.creditLimit) as number
+                      const remainingCredit = selectedAccount.remainingCredit ?? creditLimit + selectedAccount.balance
+                      const installmentPrincipalRemaining = selectedAccount.installmentPrincipalRemaining ?? 0
+                      const remainingAfter =
+                        selectedAccount.remainingCreditAfterInstallments ??
+                        remainingCredit - installmentPrincipalRemaining
+
+                      return (
+                        <>
+                          <p className="text-sm text-muted-foreground mt-1">
+                            Available (after installments): {formatCurrency(remainingAfter, selectedAccount.currency)}
+                          </p>
+                          {installmentPrincipalRemaining > 0 && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              Installments: {formatCurrency(installmentPrincipalRemaining, selectedAccount.currency)}
+                            </p>
+                          )}
+                        </>
+                      )
+                    })()
                   )}
                 </div>
 

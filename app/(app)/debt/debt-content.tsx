@@ -26,6 +26,9 @@ type DebtItem = {
   currency: Currency
   balance: number
   creditLimit?: number
+  remainingCredit?: number
+  remainingCreditAfterInstallments?: number
+  installmentPrincipalRemaining?: number
   debtAmount: number
   minPayment: number
 }
@@ -190,6 +193,9 @@ export function DebtContent() {
           currency: a.currency,
           balance: a.balance,
           creditLimit: a.creditLimit,
+          remainingCredit: a.remainingCredit,
+          remainingCreditAfterInstallments: a.remainingCreditAfterInstallments,
+          installmentPrincipalRemaining: a.installmentPrincipalRemaining,
           debtAmount,
           minPayment: config.minPaymentsByAccountId[a.id] ?? 0,
         }
@@ -361,7 +367,16 @@ export function DebtContent() {
             <TableBody>
               {debts.map((d) => {
                 const creditLimit = coerceNumber(d.creditLimit)
-                const remaining = creditLimit === null ? null : creditLimit + d.balance
+                const rawRemaining =
+                  d.remainingCredit ?? (creditLimit === null ? null : creditLimit + d.balance)
+                const installmentPrincipalRemaining =
+                  d.installmentPrincipalRemaining ??
+                  installments
+                    .filter((i) => i.accountId === d.id && i.monthsRemaining > 0)
+                    .reduce((sum, i) => sum + (i.amount / Math.max(1, i.monthsTotal)) * i.monthsRemaining, 0)
+                const remaining =
+                  d.remainingCreditAfterInstallments ??
+                  (rawRemaining === null ? null : rawRemaining - installmentPrincipalRemaining)
                 return (
                   <TableRow key={d.id}>
                     <TableCell className="font-medium">{d.name}</TableCell>

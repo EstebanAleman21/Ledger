@@ -12,6 +12,9 @@ export interface Account {
   balance: number
   openingBalance: number
   creditLimit?: number
+  remainingCredit?: number
+  installmentPrincipalRemaining?: number
+  remainingCreditAfterInstallments?: number
   color: string
   icon: string
   createdAt: string
