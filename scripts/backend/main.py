@@ -12,6 +12,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, date
 from enum import Enum
 import os
+import re
 from pathlib import Path
 from storage import get_store, SupabaseStore, InMemoryStore
 
@@ -470,6 +471,21 @@ def normalize_transaction_row(row: Dict[str, Any]) -> Dict[str, Any]:
     if normalized.get("needs_review") is None:
         normalized["needs_review"] = False
     return normalized
+
+
+def extract_storage_error_message(error: Exception) -> str:
+    try:
+        payload = error.args[0]
+        if isinstance(payload, dict) and payload.get("message"):
+            return str(payload["message"])
+    except Exception:
+        pass
+
+    text = str(error)
+    match = re.search(r"'message':\\s*'([^']+)'", text)
+    if match:
+        return match.group(1)
+    return text
 
 
 def parse_sheet_transaction(
@@ -1001,8 +1017,11 @@ async def create_transaction(data: TransactionCreate):
         raise HTTPException(status_code=400, detail="to_account_id is required for transfers")
     if transaction_data.get("type") == "adjustment" and transaction_data.get("to_account_id"):
         raise HTTPException(status_code=400, detail="to_account_id must be empty for adjustments")
-    created = store.create_transaction(transaction_data)
-    return Transaction(**normalize_transaction_row(created))
+    try:
+        created = store.create_transaction(transaction_data)
+        return Transaction(**normalize_transaction_row(created))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=extract_storage_error_message(e))
 
 @app.put("/transactions/{id}", response_model=Transaction)
 async def update_transaction(id: str, data: TransactionUpdate):
@@ -1016,7 +1035,12 @@ async def update_transaction(id: str, data: TransactionUpdate):
                 updated_data[key] = value
     updated_data["updated_at"] = now_iso()
     updated_data = normalize_uuid_inputs(updated_data, ["category_id", "account_id", "to_account_id"])
-    updated = store.update_transaction(id, updated_data)
+    if updated_data.get("type") == "adjustment" and updated_data.get("to_account_id"):
+        raise HTTPException(status_code=400, detail="to_account_id must be empty for adjustments")
+    try:
+        updated = store.update_transaction(id, updated_data)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=extract_storage_error_message(e))
     if not updated:
         raise HTTPException(status_code=404, detail="Transaction not found")
     return Transaction(**normalize_transaction_row(updated))

@@ -287,7 +287,14 @@ export async function createTransaction(data: Partial<Transaction>): Promise<Tra
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(transformRequest(data)),
   })
-  const result = await res.json()
+  const result = await res.json().catch(() => ({}))
+  if (!res.ok) {
+    const message =
+      (result && typeof result === "object" && "detail" in result && typeof (result as any).detail === "string"
+        ? (result as any).detail
+        : "Failed to create transaction")
+    throw new Error(message)
+  }
   return transformResponse<Transaction>(result)
 }
 
