@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useEffect, useMemo, useState } from "react"
 import {
   Plus,
   Search,
@@ -29,7 +29,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetTrigger } from "@/components/ui/sheet"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { CurrencyBadge } from "@/components/ui/currency-badge"
 import { EmptyState } from "@/components/ui/empty-state"
 import { TransactionDialog } from "@/components/transactions/transaction-dialog"
@@ -39,6 +39,14 @@ import { getTransactions, getCategories, getAccounts, deleteTransaction, bulkUpd
 import type { Transaction, TransactionType, Currency, Category, Account } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
+
+type SortOption = "date_desc" | "date_asc" | "amount_desc" | "amount_asc"
+
+function toDateKey(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ""
+  return trimmed.length >= 10 ? trimmed.slice(0, 10) : trimmed
+}
 
 export function TransactionsContent() {
   const [transactions, setTransactions] = useState<Transaction[]>([])
@@ -50,6 +58,10 @@ export function TransactionsContent() {
   const [selectedCategory, setSelectedCategory] = useState<string>("all")
   const [selectedAccount, setSelectedAccount] = useState<string>("all")
   const [selectedCurrency, setSelectedCurrency] = useState<Currency | "all">("all")
+  const [dateFrom, setDateFrom] = useState("")
+  const [dateTo, setDateTo] = useState("")
+  const [reviewOnly, setReviewOnly] = useState(false)
+  const [sort, setSort] = useState<SortOption>("date_desc")
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [editingTransaction, setEditingTransaction] = useState<Transaction | null>(null)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
@@ -86,33 +98,73 @@ export function TransactionsContent() {
     setEditingTransaction(null)
   }
 
-  // Filter transactions
-  const filteredTransactions = transactions.filter((txn) => {
-    if (searchQuery && !txn.description.toLowerCase().includes(searchQuery.toLowerCase())) {
-      return false
-    }
-    if (selectedType !== "all" && txn.type !== selectedType) return false
-    if (selectedCategory !== "all" && txn.categoryId !== selectedCategory) return false
-    if (selectedAccount !== "all" && txn.accountId !== selectedAccount) return false
-    if (selectedCurrency !== "all" && txn.currency !== selectedCurrency) return false
-    return true
-  })
+  const visibleTransactions = useMemo(() => {
+    const filtered = transactions.filter((txn) => {
+      if (searchQuery && !txn.description.toLowerCase().includes(searchQuery.toLowerCase())) return false
+      if (selectedType !== "all" && txn.type !== selectedType) return false
+      if (selectedCategory !== "all" && txn.categoryId !== selectedCategory) return false
+      if (selectedAccount !== "all" && txn.accountId !== selectedAccount) return false
+      if (selectedCurrency !== "all" && txn.currency !== selectedCurrency) return false
+      if (reviewOnly && !txn.needsReview) return false
+
+      const txnDateKey = toDateKey(txn.date)
+      if (dateFrom && txnDateKey && txnDateKey < dateFrom) return false
+      if (dateTo && txnDateKey && txnDateKey > dateTo) return false
+      return true
+    })
+
+    return [...filtered].sort((a, b) => {
+      if (sort === "amount_desc") return b.amount - a.amount
+      if (sort === "amount_asc") return a.amount - b.amount
+      const aDate = toDateKey(a.date)
+      const bDate = toDateKey(b.date)
+      if (sort === "date_asc") return aDate.localeCompare(bDate)
+      return bDate.localeCompare(aDate)
+    })
+  }, [
+    transactions,
+    searchQuery,
+    selectedType,
+    selectedCategory,
+    selectedAccount,
+    selectedCurrency,
+    reviewOnly,
+    dateFrom,
+    dateTo,
+    sort,
+  ])
+
+  useEffect(() => {
+    const visibleIds = new Set(visibleTransactions.map((t) => t.id))
+    setSelectedIds((prev) => prev.filter((id) => visibleIds.has(id)))
+  }, [visibleTransactions])
 
   const hasActiveFilters =
-    selectedType !== "all" || selectedCategory !== "all" || selectedAccount !== "all" || selectedCurrency !== "all"
+    selectedType !== "all" ||
+    selectedCategory !== "all" ||
+    selectedAccount !== "all" ||
+    selectedCurrency !== "all" ||
+    !!dateFrom ||
+    !!dateTo ||
+    reviewOnly ||
+    sort !== "date_desc"
 
   const clearFilters = () => {
     setSelectedType("all")
     setSelectedCategory("all")
     setSelectedAccount("all")
     setSelectedCurrency("all")
+    setDateFrom("")
+    setDateTo("")
+    setReviewOnly(false)
+    setSort("date_desc")
   }
 
   const toggleSelectAll = () => {
-    if (selectedIds.length === filteredTransactions.length) {
+    if (selectedIds.length === visibleTransactions.length) {
       setSelectedIds([])
     } else {
-      setSelectedIds(filteredTransactions.map((t) => t.id))
+      setSelectedIds(visibleTransactions.map((t) => t.id))
     }
   }
 
@@ -175,24 +227,55 @@ export function TransactionsContent() {
                 className="pl-9"
               />
             </div>
-            <Sheet open={isFilterOpen} onOpenChange={setIsFilterOpen}>
-              <SheetTrigger asChild>
-                <Button variant="outline" size="icon" className="relative bg-transparent">
-                  <Filter className="h-4 w-4" />
+            <Popover open={isFilterOpen} onOpenChange={setIsFilterOpen}>
+              <PopoverTrigger asChild>
+                <Button variant="outline" size="sm" className="relative bg-transparent">
+                  <Filter className="h-4 w-4 mr-2" />
+                  Filters
                   {hasActiveFilters && (
                     <span className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full bg-primary text-[10px] text-primary-foreground">
                       !
                     </span>
                   )}
                 </Button>
-              </SheetTrigger>
-              <SheetContent>
-                <SheetHeader>
-                  <SheetTitle>Filter Transactions</SheetTitle>
-                </SheetHeader>
-                <div className="mt-6 space-y-6">
+              </PopoverTrigger>
+              <PopoverContent align="start" className="w-[360px]">
+                <div className="space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="text-sm font-medium">Filters</div>
+                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => setIsFilterOpen(false)}>
+                      <X className="h-4 w-4" />
+                    </Button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3">
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-muted-foreground">From</label>
+                      <Input type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+                    </div>
+                    <div className="space-y-2">
+                      <label className="text-xs font-medium text-muted-foreground">To</label>
+                      <Input type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+                    </div>
+                  </div>
+
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Type</label>
+                    <label className="text-xs font-medium text-muted-foreground">Sort</label>
+                    <Select value={sort} onValueChange={(v) => setSort(v as SortOption)}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="date_desc">Date (newest)</SelectItem>
+                        <SelectItem value="date_asc">Date (oldest)</SelectItem>
+                        <SelectItem value="amount_desc">Amount (high → low)</SelectItem>
+                        <SelectItem value="amount_asc">Amount (low → high)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  <div className="space-y-2">
+                    <label className="text-xs font-medium text-muted-foreground">Type</label>
                     <Select value={selectedType} onValueChange={(v) => setSelectedType(v as TransactionType | "all")}>
                       <SelectTrigger>
                         <SelectValue />
@@ -205,8 +288,9 @@ export function TransactionsContent() {
                       </SelectContent>
                     </Select>
                   </div>
+
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Category</label>
+                    <label className="text-xs font-medium text-muted-foreground">Category</label>
                     <Select value={selectedCategory} onValueChange={setSelectedCategory}>
                       <SelectTrigger>
                         <SelectValue />
@@ -221,8 +305,9 @@ export function TransactionsContent() {
                       </SelectContent>
                     </Select>
                   </div>
+
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Account</label>
+                    <label className="text-xs font-medium text-muted-foreground">Account</label>
                     <Select value={selectedAccount} onValueChange={setSelectedAccount}>
                       <SelectTrigger>
                         <SelectValue />
@@ -237,8 +322,9 @@ export function TransactionsContent() {
                       </SelectContent>
                     </Select>
                   </div>
+
                   <div className="space-y-2">
-                    <label className="text-sm font-medium">Currency</label>
+                    <label className="text-xs font-medium text-muted-foreground">Currency</label>
                     <Select value={selectedCurrency} onValueChange={(v) => setSelectedCurrency(v as Currency | "all")}>
                       <SelectTrigger>
                         <SelectValue />
@@ -250,15 +336,23 @@ export function TransactionsContent() {
                       </SelectContent>
                     </Select>
                   </div>
-                  {hasActiveFilters && (
-                    <Button variant="outline" className="w-full bg-transparent" onClick={clearFilters}>
-                      <X className="h-4 w-4 mr-2" />
-                      Clear Filters
+
+                  <div className="flex items-center gap-2">
+                    <Checkbox checked={reviewOnly} onCheckedChange={(v) => setReviewOnly(!!v)} />
+                    <span className="text-sm">Needs review only</span>
+                  </div>
+
+                  <div className="flex gap-2">
+                    <Button variant="outline" className="flex-1 bg-transparent" onClick={clearFilters}>
+                      Clear
                     </Button>
-                  )}
+                    <Button className="flex-1" onClick={() => setIsFilterOpen(false)}>
+                      Done
+                    </Button>
+                  </div>
                 </div>
-              </SheetContent>
-            </Sheet>
+              </PopoverContent>
+            </Popover>
           </div>
 
           <div className="flex gap-2">
@@ -301,6 +395,43 @@ export function TransactionsContent() {
               <Badge variant="secondary" className="gap-1">
                 Type: {selectedType}
                 <button onClick={() => setSelectedType("all")}>
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            )}
+            {sort !== "date_desc" && (
+              <Badge variant="secondary" className="gap-1">
+                Sort:{" "}
+                {sort === "date_asc"
+                  ? "Date (oldest)"
+                  : sort === "amount_desc"
+                    ? "Amount (high → low)"
+                    : "Amount (low → high)"}
+                <button onClick={() => setSort("date_desc")}>
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            )}
+            {reviewOnly && (
+              <Badge variant="secondary" className="gap-1">
+                Review only
+                <button onClick={() => setReviewOnly(false)}>
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            )}
+            {dateFrom && (
+              <Badge variant="secondary" className="gap-1">
+                From: {dateFrom}
+                <button onClick={() => setDateFrom("")}>
+                  <X className="h-3 w-3" />
+                </button>
+              </Badge>
+            )}
+            {dateTo && (
+              <Badge variant="secondary" className="gap-1">
+                To: {dateTo}
+                <button onClick={() => setDateTo("")}>
                   <X className="h-3 w-3" />
                 </button>
               </Badge>
@@ -370,7 +501,7 @@ export function TransactionsContent() {
           <div className="flex items-center justify-center h-64">
             <div className="text-muted-foreground">Loading transactions...</div>
           </div>
-        ) : filteredTransactions.length === 0 ? (
+        ) : visibleTransactions.length === 0 ? (
           <EmptyState
             icon={ArrowLeftRight}
             title="No transactions found"
@@ -392,17 +523,14 @@ export function TransactionsContent() {
           <div className="space-y-2">
             {/* Select All Header */}
             <div className="flex items-center gap-4 px-3 py-2">
-              <Checkbox
-                checked={selectedIds.length === filteredTransactions.length}
-                onCheckedChange={toggleSelectAll}
-              />
+              <Checkbox checked={selectedIds.length === visibleTransactions.length} onCheckedChange={toggleSelectAll} />
               <span className="text-sm text-muted-foreground">
-                {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? "s" : ""}
+                {visibleTransactions.length} transaction{visibleTransactions.length !== 1 ? "s" : ""}
               </span>
             </div>
 
             {/* Transactions */}
-            {filteredTransactions.map((txn) => {
+            {visibleTransactions.map((txn) => {
               const category = categories.find((c) => c.id === txn.categoryId)
               const account = accounts.find((a) => a.id === txn.accountId)
               const toAccount = txn.toAccountId ? accounts.find((a) => a.id === txn.toAccountId) : null

@@ -2,7 +2,7 @@
 
 import type React from "react"
 
-import { useState, useEffect } from "react"
+import { useMemo, useState, useEffect } from "react"
 import {
   Plus,
   Wallet,
@@ -23,7 +23,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -33,8 +32,8 @@ import {
 } from "@/components/ui/dropdown-menu"
 import { CurrencyBadge } from "@/components/ui/currency-badge"
 import { formatCurrency, formatDateShort } from "@/lib/utils/format"
-import { getAccounts, getTransactions, createAccount, updateAccount } from "@/lib/api"
-import type { Account, AccountType, Currency, Transaction } from "@/lib/types"
+import { getAccounts, getTransactions, getInstallments, createAccount, updateAccount } from "@/lib/api"
+import type { Account, AccountType, Currency, Installment, Transaction } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
 
@@ -62,6 +61,7 @@ function coerceNumber(value: unknown): number | null {
 export function AccountsContent() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [installments, setInstallments] = useState<Installment[]>([])
   const [loading, setLoading] = useState(true)
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [editingAccount, setEditingAccount] = useState<Account | null>(null)
@@ -74,9 +74,10 @@ export function AccountsContent() {
   const loadData = async () => {
     try {
       setLoading(true)
-      const [accs, txns] = await Promise.all([getAccounts(), getTransactions()])
+      const [accs, txns, insts] = await Promise.all([getAccounts(), getTransactions(), getInstallments()])
       setAccounts(accs)
       setTransactions(txns)
+      setInstallments(insts)
     } catch (error) {
       toast.error("Failed to load accounts")
       console.error(error)
@@ -100,6 +101,35 @@ export function AccountsContent() {
     ? transactions.filter((t) => t.accountId === selectedAccount.id || t.toAccountId === selectedAccount.id)
     : []
 
+  const selectedAccountInstallments = useMemo(() => {
+    if (!selectedAccount) return []
+    return installments
+      .filter((i) => i.accountId === selectedAccount.id)
+      .sort((a, b) => toDateKey(b.purchaseDate).localeCompare(toDateKey(a.purchaseDate)))
+  }, [installments, selectedAccount])
+
+  const selectedAccountInstallmentTotals = useMemo(() => {
+    const active = selectedAccountInstallments.filter((i) => i.monthsRemaining > 0)
+    const principalPerMonth = active.reduce((sum, i) => sum + i.amount / Math.max(1, i.monthsTotal), 0)
+    const interestPerMonth = active.reduce((sum, i) => sum + (i.hasInterest ? i.interestAmountPerMonth : 0), 0)
+    const principalRemaining = active.reduce(
+      (sum, i) => sum + (i.amount / Math.max(1, i.monthsTotal)) * Math.max(0, i.monthsRemaining),
+      0,
+    )
+    const interestRemaining = active.reduce(
+      (sum, i) => sum + (i.hasInterest ? i.interestAmountPerMonth : 0) * Math.max(0, i.monthsRemaining),
+      0,
+    )
+    return {
+      principalPerMonth,
+      interestPerMonth,
+      totalPerMonth: principalPerMonth + interestPerMonth,
+      principalRemaining,
+      interestRemaining,
+      totalRemaining: principalRemaining + interestRemaining,
+    }
+  }, [selectedAccountInstallments])
+
   // Mock balance history for chart
   const balanceHistory = [
     { date: "Jan 1", balance: 38000 },
@@ -116,6 +146,12 @@ export function AccountsContent() {
         <div className="text-muted-foreground">Loading accounts...</div>
       </div>
     )
+  }
+
+  function toDateKey(value: string): string {
+    const trimmed = value.trim()
+    if (!trimmed) return ""
+    return trimmed.length >= 10 ? trimmed.slice(0, 10) : trimmed
   }
 
   return (
@@ -267,12 +303,12 @@ export function AccountsContent() {
         </Dialog>
       )}
 
-      {/* Account Detail Sheet */}
-      <Sheet open={!!selectedAccount} onOpenChange={() => setSelectedAccountId(null)}>
-        <SheetContent className="w-full sm:max-w-lg overflow-y-auto">
+      {/* Account Detail Modal */}
+      <Dialog open={!!selectedAccount} onOpenChange={(open) => !open && setSelectedAccountId(null)}>
+        <DialogContent className="max-w-2xl overflow-y-auto max-h-[85vh]">
           {selectedAccount && (
             <>
-              <SheetHeader>
+              <DialogHeader>
                 <div className="flex items-center gap-3">
                   <div
                     className="flex h-12 w-12 items-center justify-center rounded-full"
@@ -284,11 +320,11 @@ export function AccountsContent() {
                     })()}
                   </div>
                   <div>
-                    <SheetTitle>{selectedAccount.name}</SheetTitle>
+                    <DialogTitle>{selectedAccount.name}</DialogTitle>
                     <p className="text-sm text-muted-foreground capitalize">{selectedAccount.type}</p>
                   </div>
                 </div>
-              </SheetHeader>
+              </DialogHeader>
 
               <div className="mt-6 space-y-6">
                 {/* Balance Card */}
@@ -334,6 +370,64 @@ export function AccountsContent() {
                     })()
                   )}
                 </div>
+
+                {/* Installments */}
+                {(selectedAccount.type === "credit" || selectedAccountInstallments.length > 0) && (
+                  <div className="rounded-lg border border-border bg-card p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <div className="text-sm font-medium">Installments</div>
+                        <div className="text-xs text-muted-foreground">
+                          Next month expected: {formatCurrency(selectedAccountInstallmentTotals.principalPerMonth, selectedAccount.currency)}{" "}
+                          <span className="text-muted-foreground">(principal)</span>
+                        </div>
+                        {selectedAccountInstallmentTotals.interestPerMonth > 0 && (
+                          <div className="text-xs text-muted-foreground">
+                            + {formatCurrency(selectedAccountInstallmentTotals.interestPerMonth, selectedAccount.currency)}{" "}
+                            interest
+                          </div>
+                        )}
+                      </div>
+                      <div className="text-right">
+                        <div className="text-xs text-muted-foreground">Remaining (principal)</div>
+                        <div className="font-medium tabular-nums">
+                          {formatCurrency(selectedAccountInstallmentTotals.principalRemaining, selectedAccount.currency)}
+                        </div>
+                      </div>
+                    </div>
+
+                    {selectedAccountInstallments.length === 0 ? (
+                      <div className="text-sm text-muted-foreground">No installments for this account.</div>
+                    ) : (
+                      <div className="space-y-2">
+                        {selectedAccountInstallments.map((i) => {
+                          const monthlyPrincipal = i.amount / Math.max(1, i.monthsTotal)
+                          const remainingPrincipal = monthlyPrincipal * Math.max(0, i.monthsRemaining)
+                          return (
+                            <div key={i.id} className="flex items-start justify-between gap-3 rounded-md border border-border p-3">
+                              <div className="min-w-0">
+                                <div className="font-medium truncate">{i.description}</div>
+                                <div className="text-xs text-muted-foreground">
+                                  {i.monthsRemaining}/{i.monthsTotal} months • {formatDateShort(i.purchaseDate)}
+                                </div>
+                              </div>
+                              <div className="text-right shrink-0">
+                                <div className="text-xs text-muted-foreground">Next month</div>
+                                <div className="font-medium tabular-nums">
+                                  {formatCurrency(monthlyPrincipal, selectedAccount.currency)}
+                                </div>
+                                <div className="text-xs text-muted-foreground mt-1">Remaining</div>
+                                <div className="text-xs tabular-nums">
+                                  {formatCurrency(remainingPrincipal, selectedAccount.currency)}
+                                </div>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Balance Chart */}
                 <div className="space-y-3">
@@ -439,8 +533,8 @@ export function AccountsContent() {
               </div>
             </>
           )}
-        </SheetContent>
-      </Sheet>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

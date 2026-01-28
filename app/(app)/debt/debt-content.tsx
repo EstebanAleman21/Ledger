@@ -4,8 +4,10 @@ import { useEffect, useMemo, useState } from "react"
 import { Loader2 } from "lucide-react"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { createInstallment, deleteInstallment, getAccounts, getInstallments, updateInstallment } from "@/lib/api"
@@ -51,6 +53,12 @@ function coerceNumber(value: unknown): number | null {
     return Number.isFinite(parsed) ? parsed : null
   }
   return null
+}
+
+function toDateKey(value: string): string {
+  const trimmed = value.trim()
+  if (!trimmed) return ""
+  return trimmed.length >= 10 ? trimmed.slice(0, 10) : trimmed
 }
 
 function loadConfig(): DebtConfig {
@@ -482,6 +490,25 @@ function InstallmentsSection({
   const [accountId, setAccountId] = useState<string>("")
   const [saving, setSaving] = useState(false)
 
+  const [filterOpen, setFilterOpen] = useState(false)
+  const [filterQuery, setFilterQuery] = useState("")
+  const [filterAccountId, setFilterAccountId] = useState<string>("all")
+  const [filterStatus, setFilterStatus] = useState<"all" | "active" | "completed">("all")
+  const [filterSort, setFilterSort] = useState<
+    "purchase_desc" | "purchase_asc" | "amount_desc" | "amount_asc" | "remaining_desc" | "remaining_asc"
+  >("purchase_desc")
+
+  const [editingInstallment, setEditingInstallment] = useState<Installment | null>(null)
+  const [editAccountId, setEditAccountId] = useState("")
+  const [editDescription, setEditDescription] = useState("")
+  const [editAmount, setEditAmount] = useState("")
+  const [editMonthsTotal, setEditMonthsTotal] = useState("")
+  const [editMonthsRemaining, setEditMonthsRemaining] = useState("")
+  const [editHasInterest, setEditHasInterest] = useState(false)
+  const [editInterestAmountPerMonth, setEditInterestAmountPerMonth] = useState("")
+  const [editPurchaseDate, setEditPurchaseDate] = useState("")
+  const [editSaving, setEditSaving] = useState(false)
+
   const accountsById = useMemo(() => new Map(accounts.map((a) => [a.id, a])), [accounts])
   const accountsForCurrency = useMemo(
     () => accounts.filter((a) => a.currency === selectedCurrency),
@@ -491,6 +518,12 @@ function InstallmentsSection({
     () => installments.filter((i) => accountsById.get(i.accountId)?.currency === selectedCurrency),
     [installments, accountsById, selectedCurrency]
   )
+
+  useEffect(() => {
+    if (filterAccountId === "all") return
+    const stillValid = accountsForCurrency.some((a) => a.id === filterAccountId)
+    if (!stillValid) setFilterAccountId("all")
+  }, [accountsForCurrency, filterAccountId])
 
   const perAccountMonthly = useMemo(() => {
     const monthlyByAccountId = new Map<string, number>()
@@ -514,10 +547,50 @@ function InstallmentsSection({
     return rows
   }, [installmentsForCurrency, accountsById])
 
+  const visibleInstallments = useMemo(() => {
+    const query = filterQuery.trim().toLowerCase()
+    const filtered = installmentsForCurrency.filter((i) => {
+      if (filterAccountId !== "all" && i.accountId !== filterAccountId) return false
+      if (filterStatus === "active" && i.monthsRemaining <= 0) return false
+      if (filterStatus === "completed" && i.monthsRemaining > 0) return false
+      if (query && !i.description.toLowerCase().includes(query)) return false
+      return true
+    })
+
+    const remainingValue = (i: Installment) => {
+      const monthlyPrincipal = i.amount / Math.max(1, i.monthsTotal)
+      const monthlyInterest = i.hasInterest ? i.interestAmountPerMonth : 0
+      return (monthlyPrincipal + monthlyInterest) * Math.max(0, i.monthsRemaining)
+    }
+
+    return [...filtered].sort((a, b) => {
+      if (filterSort === "amount_desc") return b.amount - a.amount
+      if (filterSort === "amount_asc") return a.amount - b.amount
+      if (filterSort === "remaining_desc") return remainingValue(b) - remainingValue(a)
+      if (filterSort === "remaining_asc") return remainingValue(a) - remainingValue(b)
+      const aDate = toDateKey(a.purchaseDate)
+      const bDate = toDateKey(b.purchaseDate)
+      if (filterSort === "purchase_asc") return aDate.localeCompare(bDate)
+      return bDate.localeCompare(aDate)
+    })
+  }, [installmentsForCurrency, filterAccountId, filterQuery, filterStatus, filterSort])
+
   useEffect(() => {
     if (accountId) return
     if (accountsForCurrency.length) setAccountId(accountsForCurrency[0].id)
   }, [accountsForCurrency, accountId])
+
+  useEffect(() => {
+    if (!editingInstallment) return
+    setEditAccountId(editingInstallment.accountId)
+    setEditDescription(editingInstallment.description)
+    setEditAmount(String(editingInstallment.amount))
+    setEditMonthsTotal(String(editingInstallment.monthsTotal))
+    setEditMonthsRemaining(String(editingInstallment.monthsRemaining))
+    setEditHasInterest(!!editingInstallment.hasInterest)
+    setEditInterestAmountPerMonth(String(editingInstallment.interestAmountPerMonth || 0))
+    setEditPurchaseDate(editingInstallment.purchaseDate)
+  }, [editingInstallment])
 
   const monthlyTotals = useMemo(() => {
     const base = installmentsForCurrency.reduce((sum, i) => sum + i.amount / Math.max(1, i.monthsTotal), 0)
@@ -579,11 +652,129 @@ function InstallmentsSection({
     }
   }
 
+  const handleEdit = (installment: Installment) => {
+    setEditingInstallment(installment)
+  }
+
+  const handleSaveEdit = async () => {
+    if (!editingInstallment) return
+    setEditSaving(true)
+    try {
+      const mt = Number(editMonthsTotal)
+      const mr = Number(editMonthsRemaining)
+      const interest = editHasInterest ? Number(editInterestAmountPerMonth || 0) : 0
+      await updateInstallment(editingInstallment.id, {
+        accountId: editAccountId,
+        description: editDescription,
+        amount: Number(editAmount),
+        monthsTotal: mt,
+        monthsRemaining: mr,
+        hasInterest: editHasInterest,
+        interestAmountPerMonth: interest,
+        purchaseDate: editPurchaseDate,
+      })
+      toast.success("Installment updated")
+      setEditingInstallment(null)
+      onRefresh()
+    } catch (error) {
+      console.error(error)
+      toast.error("Failed to update installment")
+    } finally {
+      setEditSaving(false)
+    }
+  }
+
   return (
     <>
+      <Dialog open={!!editingInstallment} onOpenChange={(open) => !open && setEditingInstallment(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit installment</DialogTitle>
+          </DialogHeader>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2 md:col-span-2">
+              <Label>Account</Label>
+              <Select value={editAccountId} onValueChange={setEditAccountId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select account" />
+                </SelectTrigger>
+                <SelectContent>
+                  {accountsForCurrency.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name} ({a.type})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label>Description</Label>
+              <Input value={editDescription} onChange={(e) => setEditDescription(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Amount</Label>
+              <Input type="number" step="0.01" value={editAmount} onChange={(e) => setEditAmount(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Purchase date</Label>
+              <Input type="date" value={editPurchaseDate} onChange={(e) => setEditPurchaseDate(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Months total</Label>
+              <Input type="number" value={editMonthsTotal} onChange={(e) => setEditMonthsTotal(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Months remaining</Label>
+              <Input type="number" value={editMonthsRemaining} onChange={(e) => setEditMonthsRemaining(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Has interest?</Label>
+              <Select value={editHasInterest ? "yes" : "no"} onValueChange={(v) => setEditHasInterest(v === "yes")}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="no">No</SelectItem>
+                  <SelectItem value="yes">Yes</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Interest amount / month</Label>
+              <Input
+                type="number"
+                step="0.01"
+                value={editInterestAmountPerMonth}
+                onChange={(e) => setEditInterestAmountPerMonth(e.target.value)}
+                disabled={!editHasInterest}
+              />
+            </div>
+            <div className="md:col-span-2 flex gap-2">
+              <Button variant="outline" className="bg-transparent" onClick={() => setEditingInstallment(null)}>
+                Cancel
+              </Button>
+              <Button
+                onClick={handleSaveEdit}
+                disabled={
+                  editSaving ||
+                  !editAccountId ||
+                  !editDescription ||
+                  !editAmount ||
+                  !editMonthsTotal ||
+                  editMonthsRemaining === "" ||
+                  !editPurchaseDate
+                }
+              >
+                {editSaving ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {perAccountMonthly.length > 0 && (
         <div className="grid gap-4 md:grid-cols-3">
-          {perAccountMonthly.slice(0, 6).map((row) => (
+          {perAccountMonthly.map((row) => (
             <Card key={row.accountId}>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-muted-foreground">{row.accountName}</CardTitle>
@@ -602,7 +793,7 @@ function InstallmentsSection({
       <div className="grid gap-4 md:grid-cols-3">
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Monthly Base (MXN)</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Monthly Base ({selectedCurrency})</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold tabular-nums">{formatCurrency(monthlyTotals.base, selectedCurrency)}</div>
@@ -611,7 +802,7 @@ function InstallmentsSection({
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Monthly Interest (MXN)</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Monthly Interest ({selectedCurrency})</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold tabular-nums">{formatCurrency(monthlyTotals.interest, selectedCurrency)}</div>
@@ -620,7 +811,7 @@ function InstallmentsSection({
         </Card>
         <Card>
           <CardHeader className="pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">Monthly Total (MXN)</CardTitle>
+            <CardTitle className="text-sm font-medium text-muted-foreground">Monthly Total ({selectedCurrency})</CardTitle>
           </CardHeader>
           <CardContent>
             <div className="text-2xl font-bold tabular-nums">{formatCurrency(monthlyTotals.total, selectedCurrency)}</div>
@@ -703,7 +894,92 @@ function InstallmentsSection({
 
       <Card>
         <CardHeader>
-          <CardTitle>Installments</CardTitle>
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <CardTitle>Installments</CardTitle>
+            <div className="flex gap-2">
+              <div className="min-w-[220px]">
+                <Input
+                  placeholder="Search installments..."
+                  value={filterQuery}
+                  onChange={(e) => setFilterQuery(e.target.value)}
+                />
+              </div>
+              <Popover open={filterOpen} onOpenChange={setFilterOpen}>
+                <PopoverTrigger asChild>
+                  <Button variant="outline" className="bg-transparent">
+                    Filters
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent align="end" className="w-[320px]">
+                  <div className="space-y-4">
+                    <div className="text-sm font-medium">Installment filters</div>
+                    <div className="space-y-2">
+                      <Label>Account</Label>
+                      <Select value={filterAccountId} onValueChange={setFilterAccountId}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All accounts</SelectItem>
+                          {accountsForCurrency.map((a) => (
+                            <SelectItem key={a.id} value={a.id}>
+                              {a.name}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Status</Label>
+                      <Select value={filterStatus} onValueChange={(v) => setFilterStatus(v as "all" | "active" | "completed")}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="all">All</SelectItem>
+                          <SelectItem value="active">Active</SelectItem>
+                          <SelectItem value="completed">Completed</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Sort</Label>
+                      <Select value={filterSort} onValueChange={(v) => setFilterSort(v as typeof filterSort)}>
+                        <SelectTrigger>
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="purchase_desc">Purchase date (newest)</SelectItem>
+                          <SelectItem value="purchase_asc">Purchase date (oldest)</SelectItem>
+                          <SelectItem value="amount_desc">Amount (high → low)</SelectItem>
+                          <SelectItem value="amount_asc">Amount (low → high)</SelectItem>
+                          <SelectItem value="remaining_desc">Remaining (high → low)</SelectItem>
+                          <SelectItem value="remaining_asc">Remaining (low → high)</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button
+                        variant="outline"
+                        className="bg-transparent flex-1"
+                        onClick={() => {
+                          setFilterQuery("")
+                          setFilterAccountId("all")
+                          setFilterStatus("all")
+                          setFilterSort("purchase_desc")
+                        }}
+                      >
+                        Clear
+                      </Button>
+                      <Button className="flex-1" onClick={() => setFilterOpen(false)}>
+                        Done
+                      </Button>
+                    </div>
+                  </div>
+                </PopoverContent>
+              </Popover>
+            </div>
+          </div>
         </CardHeader>
         <CardContent>
           <Table>
@@ -721,7 +997,7 @@ function InstallmentsSection({
               </TableRow>
             </TableHeader>
             <TableBody>
-              {installmentsForCurrency.map((i) => (
+              {visibleInstallments.map((i) => (
                 <TableRow key={i.id}>
                   <TableCell className="font-medium">
                     {accountsById.get(i.accountId)?.name || "Unknown"}
@@ -744,6 +1020,9 @@ function InstallmentsSection({
                   <TableCell className="text-right tabular-nums">{i.purchaseDate}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
+                      <Button variant="outline" className="bg-transparent" size="sm" onClick={() => handleEdit(i)}>
+                        Edit
+                      </Button>
                       <Button
                         variant="outline"
                         className="bg-transparent"
@@ -760,10 +1039,10 @@ function InstallmentsSection({
                   </TableCell>
                 </TableRow>
               ))}
-              {installmentsForCurrency.length === 0 && (
+              {visibleInstallments.length === 0 && (
                 <TableRow>
                   <TableCell colSpan={9} className="text-center text-muted-foreground">
-                    No installments yet for {selectedCurrency}.
+                    No installments found for {selectedCurrency}.
                   </TableCell>
                 </TableRow>
               )}
