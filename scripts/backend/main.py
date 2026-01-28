@@ -171,6 +171,7 @@ class Account(BaseModel):
     balance: float = 0
     opening_balance: float = 0
     credit_limit: Optional[float] = None
+    statement_day: Optional[int] = None
     remaining_credit: Optional[float] = None
     installment_principal_remaining: float = 0
     remaining_credit_after_installments: Optional[float] = None
@@ -185,6 +186,7 @@ class AccountCreate(BaseModel):
     currency: Currency
     opening_balance: float = 0
     credit_limit: Optional[float] = None
+    statement_day: Optional[int] = None
     color: str = "#6b7280"
     icon: str = "wallet"
 
@@ -1161,6 +1163,8 @@ async def get_accounts():
 @app.post("/accounts", response_model=Account)
 async def create_account(data: AccountCreate):
     """Create a new account"""
+    if data.statement_day is not None and (data.statement_day < 1 or data.statement_day > 31):
+        raise HTTPException(status_code=400, detail="statement_day must be between 1 and 31")
     account_data = {
         **normalize_enums(data.dict()),
         "balance": data.opening_balance,
@@ -1173,6 +1177,8 @@ async def create_account(data: AccountCreate):
 @app.put("/accounts/{id}", response_model=Account)
 async def update_account(id: str, data: AccountCreate):
     """Update an account"""
+    if data.statement_day is not None and (data.statement_day < 1 or data.statement_day > 31):
+        raise HTTPException(status_code=400, detail="statement_day must be between 1 and 31")
     updated = store.update_account(id, {
         **normalize_enums(data.dict()),
         "balance": data.opening_balance,

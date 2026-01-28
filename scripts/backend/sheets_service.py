@@ -48,7 +48,7 @@ EXPORT_COLUMNS = {
                             'conversion_rate', 'tags', 'notes', 'needs_review', 'import_hash',
                             'source', 'created_at', 'updated_at'],
     'export_accounts': ['id', 'label', 'name', 'type', 'currency', 'balance', 'opening_balance',
-                        'credit_limit', 'color', 'icon', 'created_at', 'updated_at'],
+                        'credit_limit', 'statement_day', 'color', 'icon', 'created_at', 'updated_at'],
     'export_categories': ['id', 'label', 'name', 'icon', 'color', 'parent_id', 'type', 'budget',
                           'created_at', 'updated_at'],
     'export_budgets': ['id', 'category_id', 'month', 'amount', 'rollover', 'rollover_amount',
