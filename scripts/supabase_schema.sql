@@ -35,7 +35,7 @@ create table if not exists transactions (
   date date not null,
   description text not null,
   amount numeric not null,
-  type text not null check (type in ('income', 'expense', 'transfer')),
+  type text not null check (type in ('income', 'expense', 'transfer', 'adjustment')),
   category_id uuid references categories(id),
   account_id uuid references accounts(id),
   to_account_id uuid references accounts(id),

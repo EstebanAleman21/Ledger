@@ -273,7 +273,7 @@ export async function createTransaction(data: Partial<Transaction>): Promise<Tra
       description: data.description || "",
       amount: data.amount || 0,
       type: data.type || "expense",
-      categoryId: data.categoryId || "cat-11",
+      categoryId: data.type === "adjustment" ? undefined : (data.categoryId || "cat-11"),
       accountId: data.accountId || "acc-1",
       currency: data.currency || "MXN",
       tags: data.tags || [],

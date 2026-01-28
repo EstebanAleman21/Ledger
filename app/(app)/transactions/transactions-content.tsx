@@ -13,6 +13,7 @@ import {
   ArrowUpRight,
   ArrowDownLeft,
   ArrowLeftRight,
+  SlidersHorizontal,
   ChevronDown,
   X,
   ClipboardPaste,
@@ -280,14 +281,15 @@ export function TransactionsContent() {
                       <SelectTrigger>
                         <SelectValue />
                       </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Types</SelectItem>
-                        <SelectItem value="income">Income</SelectItem>
-                        <SelectItem value="expense">Expense</SelectItem>
-                        <SelectItem value="transfer">Transfer</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                    <SelectContent>
+                      <SelectItem value="all">All Types</SelectItem>
+                      <SelectItem value="income">Income</SelectItem>
+                      <SelectItem value="expense">Expense</SelectItem>
+                      <SelectItem value="transfer">Transfer</SelectItem>
+                      <SelectItem value="adjustment">Adjustment</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
 
                   <div className="space-y-2">
                     <label className="text-xs font-medium text-muted-foreground">Category</label>
@@ -535,6 +537,26 @@ export function TransactionsContent() {
               const account = accounts.find((a) => a.id === txn.accountId)
               const toAccount = txn.toAccountId ? accounts.find((a) => a.id === txn.toAccountId) : null
               const isSelected = selectedIds.includes(txn.id)
+              const color = category?.color || "#64748b"
+              const subtitle =
+                txn.type === "transfer"
+                  ? "Transfer"
+                  : txn.type === "adjustment"
+                    ? "Adjustment"
+                    : (category?.name || "Uncategorized")
+              const amountSign = txn.type === "income" ? "+" : txn.type === "expense" ? "-" : txn.type === "adjustment" && txn.amount > 0 ? "+" : ""
+              const amountClass =
+                txn.type === "income"
+                  ? "text-success"
+                  : txn.type === "expense"
+                    ? "text-destructive"
+                    : txn.type === "adjustment"
+                      ? txn.amount > 0
+                        ? "text-success"
+                        : txn.amount < 0
+                          ? "text-destructive"
+                          : "text-foreground"
+                      : "text-foreground"
 
               return (
                 <div
@@ -548,14 +570,16 @@ export function TransactionsContent() {
 
                   <div
                     className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
-                    style={{ backgroundColor: `${category?.color}20` }}
+                    style={{ backgroundColor: `${color}20` }}
                   >
                     {txn.type === "income" ? (
-                      <ArrowDownLeft className="h-5 w-5" style={{ color: category?.color }} />
+                      <ArrowDownLeft className="h-5 w-5" style={{ color }} />
                     ) : txn.type === "expense" ? (
-                      <ArrowUpRight className="h-5 w-5" style={{ color: category?.color }} />
+                      <ArrowUpRight className="h-5 w-5" style={{ color }} />
+                    ) : txn.type === "adjustment" ? (
+                      <SlidersHorizontal className="h-5 w-5" style={{ color }} />
                     ) : (
-                      <ArrowLeftRight className="h-5 w-5" style={{ color: category?.color }} />
+                      <ArrowLeftRight className="h-5 w-5" style={{ color }} />
                     )}
                   </div>
 
@@ -569,7 +593,7 @@ export function TransactionsContent() {
                       )}
                     </div>
                     <p className="text-sm text-muted-foreground truncate">
-                      {category?.name}
+                      {subtitle}
                       {txn.type === "transfer" && toAccount ? ` → ${toAccount.name}` : ` • ${account?.name}`}
                       {" • "}
                       {formatDateShort(txn.date)}
@@ -581,14 +605,10 @@ export function TransactionsContent() {
                     <span
                       className={cn(
                         "font-semibold tabular-nums min-w-[80px] text-right",
-                        txn.type === "income"
-                          ? "text-success"
-                          : txn.type === "expense"
-                            ? "text-destructive"
-                            : "text-foreground",
+                        amountClass,
                       )}
                     >
-                      {txn.type === "income" ? "+" : txn.type === "expense" ? "-" : ""}
+                      {amountSign}
                       {formatCurrency(txn.amount, txn.currency)}
                     </span>
 

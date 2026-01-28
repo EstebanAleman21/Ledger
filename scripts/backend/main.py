@@ -83,6 +83,7 @@ class TransactionType(str, Enum):
     income = "income"
     expense = "expense"
     transfer = "transfer"
+    adjustment = "adjustment"
 
 class AccountType(str, Enum):
     cash = "cash"
@@ -404,6 +405,9 @@ def apply_computed_account_balances(
         elif txn_type == "expense":
             if account_id:
                 balances[account_id] = balances.get(account_id, 0) - amount
+        elif txn_type == "adjustment":
+            if account_id:
+                balances[account_id] = balances.get(account_id, 0) + amount
 
     computed = []
     for acc in accounts:
@@ -933,9 +937,12 @@ async def get_transactions(
 @app.post("/transactions", response_model=Transaction)
 async def create_transaction(data: TransactionCreate):
     """Create a new transaction, applying category rules if no category provided"""
+    txn_type = data.type.value if isinstance(data.type, TransactionType) else data.type
     # Apply category rules if no category specified
     category_id = data.category_id
-    if not category_id and data.description:
+    if txn_type == "adjustment":
+        category_id = None
+    elif not category_id and data.description:
         for rule in store.list_rules():
             matched = False
             rule_field = rule.get("field") if isinstance(rule, dict) else rule.field
@@ -973,7 +980,7 @@ async def create_transaction(data: TransactionCreate):
         "date": data.date,
         "description": data.description,
         "amount": data.amount,
-        "type": data.type.value if isinstance(data.type, TransactionType) else data.type,
+        "type": txn_type,
         "category_id": category_id,
         "account_id": data.account_id,
         "to_account_id": data.to_account_id,
@@ -982,7 +989,7 @@ async def create_transaction(data: TransactionCreate):
         "conversion_rate": data.conversion_rate,
         "tags": data.tags or [],
         "notes": data.notes,
-        "needs_review": data.needs_review if data.needs_review is not None else (not category_id),
+        "needs_review": data.needs_review if data.needs_review is not None else (False if txn_type == "adjustment" else (not category_id)),
         "created_at": now_iso(),
         "updated_at": now_iso(),
         "source": "app"
@@ -992,6 +999,8 @@ async def create_transaction(data: TransactionCreate):
         raise HTTPException(status_code=400, detail="account_id is required")
     if transaction_data.get("type") == "transfer" and not transaction_data.get("to_account_id"):
         raise HTTPException(status_code=400, detail="to_account_id is required for transfers")
+    if transaction_data.get("type") == "adjustment" and transaction_data.get("to_account_id"):
+        raise HTTPException(status_code=400, detail="to_account_id must be empty for adjustments")
     created = store.create_transaction(transaction_data)
     return Transaction(**normalize_transaction_row(created))
 

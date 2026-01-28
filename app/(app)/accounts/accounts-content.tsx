@@ -15,6 +15,8 @@ import {
   Trash2,
   ArrowUpRight,
   ArrowDownLeft,
+  ArrowLeftRight,
+  SlidersHorizontal,
 } from "lucide-react"
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from "recharts"
 import { Button } from "@/components/ui/button"
@@ -279,6 +281,7 @@ export function AccountsContent() {
             const availableAfterInstallments =
               account.remainingCreditAfterInstallments ??
               (availableCredit === null ? null : availableCredit - installmentPrincipalRemaining)
+            const effectiveBalance = isCredit ? account.balance - installmentPrincipalRemaining : account.balance
             const spentThisCycle = spentThisCycleByAccountId.get(account.id)
 
             return (
@@ -339,6 +342,16 @@ export function AccountsContent() {
                     >
                       {formatCurrency(account.balance, account.currency)}
                     </p>
+                    {isCredit && installmentPrincipalRemaining > 0 && (
+                      <p
+                        className={cn(
+                          "text-sm tabular-nums",
+                          effectiveBalance < 0 ? "text-destructive" : "text-foreground",
+                        )}
+                      >
+                        Effective balance: {formatCurrency(effectiveBalance, account.currency)}
+                      </p>
+                    )}
                     {availableAfterInstallments !== null && (
                       <p className="text-sm text-muted-foreground">
                         {formatCurrency(availableAfterInstallments, account.currency)} available (after installments)
@@ -422,9 +435,20 @@ export function AccountsContent() {
                       const remainingAfter =
                         selectedAccount.remainingCreditAfterInstallments ??
                         remainingCredit - installmentPrincipalRemaining
+                      const effectiveBalance = selectedAccount.balance - installmentPrincipalRemaining
 
                       return (
                         <>
+                          {installmentPrincipalRemaining > 0 && (
+                            <p
+                              className={cn(
+                                "text-sm mt-1 tabular-nums",
+                                effectiveBalance < 0 ? "text-destructive" : "text-foreground",
+                              )}
+                            >
+                              Effective balance: {formatCurrency(effectiveBalance, selectedAccount.currency)}
+                            </p>
+                          )}
                           <p className="text-sm text-muted-foreground mt-1">
                             Available (after installments): {formatCurrency(remainingAfter, selectedAccount.currency)}
                           </p>
@@ -547,13 +571,21 @@ export function AccountsContent() {
                         <div
                           className={cn(
                             "flex h-8 w-8 items-center justify-center rounded-full",
-                            txn.type === "income" ? "bg-success/10" : "bg-destructive/10",
+                            txn.type === "income"
+                              ? "bg-success/10"
+                              : txn.type === "expense"
+                                ? "bg-destructive/10"
+                                : "bg-muted",
                           )}
                         >
                           {txn.type === "income" ? (
                             <ArrowDownLeft className="h-4 w-4 text-success" />
-                          ) : (
+                          ) : txn.type === "expense" ? (
                             <ArrowUpRight className="h-4 w-4 text-destructive" />
+                          ) : txn.type === "transfer" ? (
+                            <ArrowLeftRight className="h-4 w-4 text-foreground" />
+                          ) : (
+                            <SlidersHorizontal className="h-4 w-4 text-foreground" />
                           )}
                         </div>
                         <div className="flex-1 min-w-0">
@@ -563,10 +595,20 @@ export function AccountsContent() {
                         <span
                           className={cn(
                             "text-sm font-semibold tabular-nums",
-                            txn.type === "income" ? "text-success" : "text-destructive",
+                            txn.type === "income"
+                              ? "text-success"
+                              : txn.type === "expense"
+                                ? "text-destructive"
+                                : txn.type === "adjustment"
+                                  ? txn.amount > 0
+                                    ? "text-success"
+                                    : txn.amount < 0
+                                      ? "text-destructive"
+                                      : "text-foreground"
+                                  : "text-foreground",
                           )}
                         >
-                          {txn.type === "income" ? "+" : "-"}
+                          {txn.type === "income" ? "+" : txn.type === "expense" ? "-" : txn.type === "adjustment" && txn.amount > 0 ? "+" : ""}
                           {formatCurrency(txn.amount, txn.currency)}
                         </span>
                       </div>

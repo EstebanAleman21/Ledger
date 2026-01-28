@@ -109,7 +109,9 @@ export function DashboardContent() {
     }
   }, [transactions, categories])
 
-  const filteredTransactions = transactions.filter((txn) =>
+  const dashboardTransactions = useMemo(() => transactions.filter((t) => t.type !== "adjustment"), [transactions])
+
+  const filteredTransactions = dashboardTransactions.filter((txn) =>
     txn.description.toLowerCase().includes(searchQuery.toLowerCase()),
   )
 
@@ -166,7 +168,7 @@ export function DashboardContent() {
             <Target className="h-4 w-4 text-muted-foreground" />
           </CardHeader>
           <CardContent>
-            <div className="text-2xl font-bold text-foreground">{transactions.length}</div>
+            <div className="text-2xl font-bold text-foreground">{dashboardTransactions.length}</div>
             <p className="text-xs text-muted-foreground mt-1">Total recorded</p>
           </CardContent>
         </Card>
@@ -246,7 +248,7 @@ export function DashboardContent() {
       </div>
 
       {/* Income vs Expenses Chart - Show only if we have data */}
-      {transactions.length > 0 && (
+      {dashboardTransactions.length > 0 && (
         <Card>
           <CardHeader>
             <CardTitle className="text-base font-medium">Summary</CardTitle>
@@ -302,6 +304,8 @@ export function DashboardContent() {
             {filteredTransactions.slice(0, 8).map((txn) => {
               const category = categories.find((c) => c.id === txn.categoryId)
               const account = accounts.find((a) => a.id === txn.accountId)
+              const color = category?.color || "#64748b"
+              const categoryLabel = txn.type === "transfer" ? "Transfer" : (category?.name || "Uncategorized")
               return (
                 <div
                   key={txn.id}
@@ -309,14 +313,14 @@ export function DashboardContent() {
                 >
                   <div
                     className="flex h-10 w-10 items-center justify-center rounded-full"
-                    style={{ backgroundColor: `${category?.color}20` }}
+                    style={{ backgroundColor: `${color}20` }}
                   >
                     {txn.type === "income" ? (
-                      <ArrowDownLeft className="h-5 w-5" style={{ color: category?.color }} />
+                      <ArrowDownLeft className="h-5 w-5" style={{ color }} />
                     ) : txn.type === "expense" ? (
-                      <ArrowUpRight className="h-5 w-5" style={{ color: category?.color }} />
+                      <ArrowUpRight className="h-5 w-5" style={{ color }} />
                     ) : (
-                      <TrendingUp className="h-5 w-5" style={{ color: category?.color }} />
+                      <TrendingUp className="h-5 w-5" style={{ color }} />
                     )}
                   </div>
                   <div className="flex-1 min-w-0">
@@ -329,7 +333,7 @@ export function DashboardContent() {
                       )}
                     </div>
                     <p className="text-sm text-muted-foreground">
-                      {category?.name} • {account?.name} • {formatDateShort(txn.date)}
+                      {categoryLabel} • {account?.name} • {formatDateShort(txn.date)}
                     </p>
                   </div>
                   <div className="flex items-center gap-2">

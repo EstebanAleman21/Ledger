@@ -1,6 +1,6 @@
 export type Currency = "MXN" | "USD"
 
-export type TransactionType = "income" | "expense" | "transfer"
+export type TransactionType = "income" | "expense" | "transfer" | "adjustment"
 
 export type AccountType = "cash" | "debit" | "credit" | "savings" | "investment"
 

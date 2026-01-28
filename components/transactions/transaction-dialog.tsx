@@ -3,7 +3,7 @@
 import type React from "react"
 
 import { useState, useEffect } from "react"
-import { CalendarIcon, ArrowDownLeft, ArrowUpRight, ArrowLeftRight } from "lucide-react"
+import { CalendarIcon, ArrowDownLeft, ArrowUpRight, ArrowLeftRight, SlidersHorizontal } from "lucide-react"
 import { format } from "date-fns"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -77,7 +77,7 @@ export function TransactionDialog({ open, onOpenChange, onSave, transaction }: T
   }
 
   const filteredCategories = categories.filter(
-    (cat) => cat.type === "both" || cat.type === type || type === "transfer",
+    (cat) => cat.type === "both" || cat.type === type || type === "transfer" || type === "adjustment",
   )
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -90,7 +90,7 @@ export function TransactionDialog({ open, onOpenChange, onSave, transaction }: T
         date: format(date, "yyyy-MM-dd"),
         description,
         amount: Number.parseFloat(amount),
-        categoryId: type === "transfer" ? "" : categoryId,
+        categoryId: type === "transfer" || type === "adjustment" ? "" : categoryId,
         accountId,
         toAccountId: type === "transfer" ? toAccountId : undefined,
         currency,
@@ -124,7 +124,7 @@ export function TransactionDialog({ open, onOpenChange, onSave, transaction }: T
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
           {/* Transaction Type */}
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-4 gap-2">
             <Button
               type="button"
               variant={type === "expense" ? "default" : "outline"}
@@ -158,12 +158,21 @@ export function TransactionDialog({ open, onOpenChange, onSave, transaction }: T
               <ArrowLeftRight className="h-4 w-4" />
               <span className="text-xs">Transfer</span>
             </Button>
+            <Button
+              type="button"
+              variant={type === "adjustment" ? "default" : "outline"}
+              className={cn("flex-col gap-1 h-auto py-3", type === "adjustment" && "bg-muted")}
+              onClick={() => setType("adjustment")}
+            >
+              <SlidersHorizontal className="h-4 w-4" />
+              <span className="text-xs">Adjust</span>
+            </Button>
           </div>
 
           {/* Amount & Currency */}
           <div className="grid grid-cols-3 gap-3">
             <div className="col-span-2 space-y-2">
-              <Label htmlFor="amount">Amount</Label>
+              <Label htmlFor="amount">{type === "adjustment" ? "Adjustment amount (delta)" : "Amount"}</Label>
               <Input
                 id="amount"
                 type="number"
@@ -174,6 +183,11 @@ export function TransactionDialog({ open, onOpenChange, onSave, transaction }: T
                 className="text-lg font-medium"
                 required
               />
+              {type === "adjustment" && (
+                <p className="text-xs text-muted-foreground">
+                  Positive increases balance; negative decreases. For credit cards, a more negative balance means more debt.
+                </p>
+              )}
             </div>
             <div className="space-y-2">
               <Label htmlFor="currency">Currency</Label>
@@ -265,7 +279,7 @@ export function TransactionDialog({ open, onOpenChange, onSave, transaction }: T
           )}
 
           {/* Category */}
-          {type !== "transfer" && (
+          {type !== "transfer" && type !== "adjustment" && (
             <div className="space-y-2">
               <Label htmlFor="category">Category</Label>
               <Select value={categoryId} onValueChange={setCategoryId}>
