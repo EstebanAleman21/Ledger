@@ -12,6 +12,7 @@ export interface Account {
   balance: number
   openingBalance: number
   creditLimit?: number
+  statementDay?: number
   remainingCredit?: number
   installmentPrincipalRemaining?: number
   remainingCreditAfterInstallments?: number

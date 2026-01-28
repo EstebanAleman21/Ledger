@@ -45,6 +45,7 @@ export const mockAccounts: Account[] = [
     balance: -8500,
     openingBalance: 0,
     creditLimit: 50000,
+    statementDay: 15,
     color: "#f43f5e",
     icon: "credit-card",
     createdAt: "2024-01-01",

@@ -96,6 +96,65 @@ export function AccountsContent() {
   const totalsByMXN = accounts.filter((a) => a.currency === "MXN").reduce((sum, a) => sum + a.balance, 0)
   const totalsByUSD = accounts.filter((a) => a.currency === "USD").reduce((sum, a) => sum + a.balance, 0)
 
+  function toDateKey(value: string): string {
+    const trimmed = value.trim()
+    if (!trimmed) return ""
+    return trimmed.length >= 10 ? trimmed.slice(0, 10) : trimmed
+  }
+
+  function statementDateForMonth(year: number, monthIndex: number, statementDay: number): Date {
+    const lastDay = new Date(year, monthIndex + 1, 0).getDate()
+    const day = Math.min(Math.max(1, statementDay), lastDay)
+    return new Date(year, monthIndex, day)
+  }
+
+  function addDays(date: Date, days: number): Date {
+    const next = new Date(date)
+    next.setDate(next.getDate() + days)
+    return next
+  }
+
+  function dateKey(date: Date): string {
+    return date.toISOString().slice(0, 10)
+  }
+
+  function getStatementCycleRange(today: Date, statementDay: number): { startKey: string; endKey: string } {
+    const thisMonthStatement = statementDateForMonth(today.getFullYear(), today.getMonth(), statementDay)
+    const end =
+      today.getTime() <= thisMonthStatement.getTime()
+        ? thisMonthStatement
+        : statementDateForMonth(today.getFullYear(), today.getMonth() + 1, statementDay)
+    const prev =
+      today.getTime() <= thisMonthStatement.getTime()
+        ? statementDateForMonth(today.getFullYear(), today.getMonth() - 1, statementDay)
+        : thisMonthStatement
+    const start = addDays(prev, 1)
+    return { startKey: dateKey(start), endKey: dateKey(end) }
+  }
+
+  const spentThisCycleByAccountId = useMemo(() => {
+    const today = new Date()
+    const todayKey = dateKey(today)
+    const spendById = new Map<string, number>()
+
+    const startKeyById = new Map<string, string>()
+    for (const acc of accounts) {
+      if (acc.type !== "credit" || !acc.statementDay) continue
+      startKeyById.set(acc.id, getStatementCycleRange(today, acc.statementDay).startKey)
+    }
+
+    for (const txn of transactions) {
+      if (txn.type !== "expense") continue
+      const startKey = startKeyById.get(txn.accountId)
+      if (!startKey) continue
+      const txnKey = toDateKey(txn.date)
+      if (txnKey < startKey || txnKey > todayKey) continue
+      spendById.set(txn.accountId, (spendById.get(txn.accountId) || 0) + txn.amount)
+    }
+
+    return spendById
+  }, [accounts, transactions])
+
   const selectedAccount = selectedAccountId ? accounts.find((a) => a.id === selectedAccountId) : null
   const accountTransactions = selectedAccount
     ? transactions.filter((t) => t.accountId === selectedAccount.id || t.toAccountId === selectedAccount.id)
@@ -130,6 +189,15 @@ export function AccountsContent() {
     }
   }, [selectedAccountInstallments])
 
+  const selectedAccountStatement = useMemo(() => {
+    if (!selectedAccount?.statementDay) return null
+    const today = new Date()
+    const { startKey, endKey } = getStatementCycleRange(today, selectedAccount.statementDay)
+    const todayKey = dateKey(today)
+    const spent = spentThisCycleByAccountId.get(selectedAccount.id) || 0
+    return { startKey, endKey, todayKey, spent }
+  }, [selectedAccount, spentThisCycleByAccountId])
+
   // Mock balance history for chart
   const balanceHistory = [
     { date: "Jan 1", balance: 38000 },
@@ -146,12 +214,6 @@ export function AccountsContent() {
         <div className="text-muted-foreground">Loading accounts...</div>
       </div>
     )
-  }
-
-  function toDateKey(value: string): string {
-    const trimmed = value.trim()
-    if (!trimmed) return ""
-    return trimmed.length >= 10 ? trimmed.slice(0, 10) : trimmed
   }
 
   return (
@@ -217,6 +279,7 @@ export function AccountsContent() {
             const availableAfterInstallments =
               account.remainingCreditAfterInstallments ??
               (availableCredit === null ? null : availableCredit - installmentPrincipalRemaining)
+            const spentThisCycle = spentThisCycleByAccountId.get(account.id)
 
             return (
               <Card
@@ -284,6 +347,11 @@ export function AccountsContent() {
                     {isCredit && installmentPrincipalRemaining > 0 && (
                       <p className="text-xs text-muted-foreground">
                         Installments: {formatCurrency(installmentPrincipalRemaining, account.currency)}
+                      </p>
+                    )}
+                    {isCredit && account.statementDay && (
+                      <p className="text-xs text-muted-foreground">
+                        This cycle ({account.statementDay}): {formatCurrency(spentThisCycle || 0, account.currency)}
                       </p>
                     )}
                   </div>
@@ -363,6 +431,14 @@ export function AccountsContent() {
                           {installmentPrincipalRemaining > 0 && (
                             <p className="text-xs text-muted-foreground mt-1">
                               Installments: {formatCurrency(installmentPrincipalRemaining, selectedAccount.currency)}
+                            </p>
+                          )}
+                          {selectedAccountStatement && (
+                            <p className="text-xs text-muted-foreground mt-1">
+                              This cycle ({selectedAccount.statementDay}): {formatCurrency(selectedAccountStatement.spent, selectedAccount.currency)}{" "}
+                              <span className="text-muted-foreground">
+                                ({formatDateShort(selectedAccountStatement.startKey)} → {formatDateShort(selectedAccountStatement.endKey)})
+                              </span>
                             </p>
                           )}
                         </>
@@ -551,6 +627,7 @@ function AccountDialog({ account, onClose, onSave }: AccountDialogProps) {
   const [currency, setCurrency] = useState<Currency>(account?.currency || "MXN")
   const [openingBalance, setOpeningBalance] = useState(account?.openingBalance?.toString() || "0")
   const [creditLimit, setCreditLimit] = useState(account?.creditLimit?.toString() || "")
+  const [statementDay, setStatementDay] = useState(account?.statementDay?.toString() || "")
   const [selectedColor, setSelectedColor] = useState(account?.color || colorOptions[0])
   const [loading, setLoading] = useState(false)
 
@@ -565,6 +642,7 @@ function AccountDialog({ account, onClose, onSave }: AccountDialogProps) {
         currency,
         openingBalance: Number.parseFloat(openingBalance),
         creditLimit: creditLimit ? Number.parseFloat(creditLimit) : undefined,
+        statementDay: type === "credit" && statementDay ? Number.parseInt(statementDay, 10) : undefined,
         color: selectedColor,
         icon: type === "credit" ? "credit-card" : type === "savings" ? "piggy-bank" : "wallet",
       }
@@ -641,17 +719,32 @@ function AccountDialog({ account, onClose, onSave }: AccountDialogProps) {
         </div>
 
         {type === "credit" && (
-          <div className="space-y-2">
-            <Label htmlFor="creditLimit">Credit Limit</Label>
-            <Input
-              id="creditLimit"
-              type="number"
-              step="0.01"
-              value={creditLimit}
-              onChange={(e) => setCreditLimit(e.target.value)}
-              placeholder="50000"
-            />
-          </div>
+          <>
+            <div className="space-y-2">
+              <Label htmlFor="creditLimit">Credit Limit</Label>
+              <Input
+                id="creditLimit"
+                type="number"
+                step="0.01"
+                value={creditLimit}
+                onChange={(e) => setCreditLimit(e.target.value)}
+                placeholder="50000"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="statementDay">Statement day (fecha de corte)</Label>
+              <Input
+                id="statementDay"
+                type="number"
+                min={1}
+                max={31}
+                value={statementDay}
+                onChange={(e) => setStatementDay(e.target.value)}
+                placeholder="15"
+              />
+              <p className="text-xs text-muted-foreground">Day of month used to calculate your current statement cycle.</p>
+            </div>
+          </>
         )}
 
         <div className="space-y-2">

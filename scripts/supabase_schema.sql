@@ -11,6 +11,7 @@ create table if not exists accounts (
   balance numeric not null default 0,
   opening_balance numeric not null default 0,
   credit_limit numeric,
+  statement_day integer check (statement_day >= 1 and statement_day <= 31),
   color text,
   icon text,
   created_at timestamptz not null default now(),

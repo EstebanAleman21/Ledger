@@ -395,6 +395,7 @@ export async function createAccount(data: Partial<Account>): Promise<Account> {
       currency: data.currency || "MXN",
       balance: data.openingBalance || 0,
       openingBalance: data.openingBalance || 0,
+      statementDay: data.statementDay,
       color: data.color || "#6b7280",
       icon: data.icon || "wallet",
       createdAt: new Date().toISOString(),
