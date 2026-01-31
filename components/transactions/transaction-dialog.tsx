@@ -10,6 +10,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Calendar } from "@/components/ui/calendar"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -57,14 +58,27 @@ export function TransactionDialog({ open, onOpenChange, onSave, transaction }: T
   const [toAccountId, setToAccountId] = useState(transaction?.toAccountId || "")
   const [currency, setCurrency] = useState<Currency>(transaction?.currency || "MXN")
   const [notes, setNotes] = useState(transaction?.notes || "")
+  const [hasInstallmentPlan, setHasInstallmentPlan] = useState(false)
+  const [installmentMonthsTotal, setInstallmentMonthsTotal] = useState("12")
+  const [installmentMonthsRemaining, setInstallmentMonthsRemaining] = useState("")
+  const [installmentHasInterest, setInstallmentHasInterest] = useState(false)
+  const [installmentInterestAmount, setInstallmentInterestAmount] = useState("")
 
   const isEditing = !!transaction?.id
+  const selectedAccount = accounts.find((acc) => acc.id === accountId)
+  const canUseInstallmentPlan = !isEditing && type === "expense" && selectedAccount?.type === "credit"
 
   useEffect(() => {
     if (open) {
       loadData()
     }
   }, [open])
+
+  useEffect(() => {
+    if (!canUseInstallmentPlan && hasInstallmentPlan) {
+      setHasInstallmentPlan(false)
+    }
+  }, [canUseInstallmentPlan, hasInstallmentPlan])
 
   const loadData = async () => {
     try {
@@ -96,6 +110,14 @@ export function TransactionDialog({ open, onOpenChange, onSave, transaction }: T
         currency,
         notes,
         tags: [],
+        installmentPlan: hasInstallmentPlan
+          ? {
+              monthsTotal: Number.parseInt(installmentMonthsTotal, 10),
+              monthsRemaining: installmentMonthsRemaining ? Number.parseInt(installmentMonthsRemaining, 10) : undefined,
+              hasInterest: installmentHasInterest,
+              interestAmountPerMonth: installmentHasInterest ? Number.parseFloat(installmentInterestAmount || "0") : 0,
+            }
+          : undefined,
       }
 
       if (isEditing && transaction?.id) {
@@ -294,6 +316,64 @@ export function TransactionDialog({ open, onOpenChange, onSave, transaction }: T
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          )}
+
+          {/* Installment Plan */}
+          {type === "expense" && (
+            <div className="rounded-lg border border-border bg-card p-3 space-y-3">
+              <div className="flex items-center justify-between">
+                <Label>Installment plan</Label>
+                <Switch checked={hasInstallmentPlan} onCheckedChange={setHasInstallmentPlan} disabled={!canUseInstallmentPlan} />
+              </div>
+              {!canUseInstallmentPlan && (
+                <p className="text-xs text-muted-foreground">
+                  Installments can only be set when creating a new expense for a credit account.
+                </p>
+              )}
+              {hasInstallmentPlan && (
+                <div className="grid grid-cols-2 gap-3">
+                  <div className="space-y-2">
+                    <Label htmlFor="installmentMonthsTotal">Months total</Label>
+                    <Input
+                      id="installmentMonthsTotal"
+                      type="number"
+                      value={installmentMonthsTotal}
+                      onChange={(e) => setInstallmentMonthsTotal(e.target.value)}
+                      min={1}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label htmlFor="installmentMonthsRemaining">Months remaining (optional)</Label>
+                    <Input
+                      id="installmentMonthsRemaining"
+                      type="number"
+                      value={installmentMonthsRemaining}
+                      onChange={(e) => setInstallmentMonthsRemaining(e.target.value)}
+                      min={0}
+                    />
+                  </div>
+                  <div className="col-span-2 flex items-center justify-between">
+                    <Label>Has interest?</Label>
+                    <Switch checked={installmentHasInterest} onCheckedChange={setInstallmentHasInterest} />
+                  </div>
+                  {installmentHasInterest && (
+                    <div className="col-span-2 space-y-2">
+                      <Label htmlFor="installmentInterestAmount">Interest amount / month</Label>
+                      <Input
+                        id="installmentInterestAmount"
+                        type="number"
+                        step="0.01"
+                        value={installmentInterestAmount}
+                        onChange={(e) => setInstallmentInterestAmount(e.target.value)}
+                      />
+                    </div>
+                  )}
+                  <div className="col-span-2 text-xs text-muted-foreground">
+                    Creates an installment schedule tied to this transaction. Payments are recorded separately.
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

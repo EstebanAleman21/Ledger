@@ -133,6 +133,12 @@ class Transaction(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 
+class InstallmentPlan(BaseModel):
+    months_total: int
+    months_remaining: Optional[int] = None
+    has_interest: bool = False
+    interest_amount_per_month: float = 0
+
 class TransactionCreate(BaseModel):
     date: str
     description: str
@@ -147,6 +153,7 @@ class TransactionCreate(BaseModel):
     tags: List[str] = []
     notes: Optional[str] = None
     needs_review: Optional[bool] = None
+    installment_plan: Optional[InstallmentPlan] = None
 
 class TransactionUpdate(BaseModel):
     date: Optional[str] = None
@@ -176,6 +183,7 @@ class Account(BaseModel):
     statement_day: Optional[int] = None
     remaining_credit: Optional[float] = None
     installment_principal_remaining: float = 0
+    installment_principal_remaining_off_ledger: float = 0
     remaining_credit_after_installments: Optional[float] = None
     color: str = "#6b7280"
     icon: str = "wallet"
@@ -280,6 +288,7 @@ class YearlyReport(BaseModel):
 class Installment(BaseModel):
     id: Optional[str] = None
     account_id: str
+    transaction_id: Optional[str] = None
     description: str
     amount: float
     months_total: int
@@ -292,6 +301,7 @@ class Installment(BaseModel):
 
 class InstallmentCreate(BaseModel):
     account_id: str
+    transaction_id: Optional[str] = None
     description: str
     amount: float
     months_total: int
@@ -302,6 +312,7 @@ class InstallmentCreate(BaseModel):
 
 class InstallmentUpdate(BaseModel):
     account_id: Optional[str] = None
+    transaction_id: Optional[str] = None
     description: Optional[str] = None
     amount: Optional[float] = None
     months_total: Optional[int] = None
@@ -422,6 +433,7 @@ def compute_credit_account_availability(
     installments: List[Dict[str, Any]],
 ) -> List[Dict[str, Any]]:
     principal_remaining_by_account: Dict[str, float] = {}
+    principal_remaining_off_ledger_by_account: Dict[str, float] = {}
     for inst in installments:
         account_id = inst.get("account_id")
         if not account_id:
@@ -432,9 +444,12 @@ def compute_credit_account_availability(
         months_total = float(inst.get("months_total") or 1)
         amount = float(inst.get("amount") or 0)
         monthly_principal = amount / max(1.0, months_total)
-        principal_remaining_by_account[account_id] = principal_remaining_by_account.get(account_id, 0.0) + (
-            monthly_principal * months_remaining
-        )
+        remaining_principal = monthly_principal * months_remaining
+        principal_remaining_by_account[account_id] = principal_remaining_by_account.get(account_id, 0.0) + remaining_principal
+        if not inst.get("transaction_id"):
+            principal_remaining_off_ledger_by_account[account_id] = (
+                principal_remaining_off_ledger_by_account.get(account_id, 0.0) + remaining_principal
+            )
 
     computed: List[Dict[str, Any]] = []
     for acc in accounts:
@@ -452,12 +467,14 @@ def compute_credit_account_availability(
             remaining_credit = None
 
         installment_principal_remaining = principal_remaining_by_account.get(acc.get("id"), 0.0)
-        remaining_after = None if remaining_credit is None else remaining_credit - installment_principal_remaining
+        installment_principal_remaining_off_ledger = principal_remaining_off_ledger_by_account.get(acc.get("id"), 0.0)
+        remaining_after = None if remaining_credit is None else remaining_credit - installment_principal_remaining_off_ledger
 
         computed.append({
             **acc,
             "remaining_credit": remaining_credit,
             "installment_principal_remaining": installment_principal_remaining,
+            "installment_principal_remaining_off_ledger": installment_principal_remaining_off_ledger,
             "remaining_credit_after_installments": remaining_after,
         })
 
@@ -954,6 +971,8 @@ async def get_transactions(
 async def create_transaction(data: TransactionCreate):
     """Create a new transaction, applying category rules if no category provided"""
     txn_type = data.type.value if isinstance(data.type, TransactionType) else data.type
+    if data.installment_plan and txn_type != "expense":
+        raise HTTPException(status_code=400, detail="installment_plan is only allowed for expense transactions")
     # Apply category rules if no category specified
     category_id = data.category_id
     if txn_type == "adjustment":
@@ -1019,8 +1038,47 @@ async def create_transaction(data: TransactionCreate):
         raise HTTPException(status_code=400, detail="to_account_id must be empty for adjustments")
     try:
         created = store.create_transaction(transaction_data)
+        if data.installment_plan:
+            account = next((a for a in store.list_accounts() if a.get("id") == transaction_data.get("account_id")), None)
+            if account and account.get("type") != "credit":
+                raise HTTPException(status_code=400, detail="installment_plan requires a credit account")
+
+            months_total = data.installment_plan.months_total
+            months_remaining = (
+                data.installment_plan.months_remaining
+                if data.installment_plan.months_remaining is not None
+                else months_total
+            )
+            if months_total <= 0:
+                raise HTTPException(status_code=400, detail="installment_plan.months_total must be > 0")
+            if months_remaining < 0 or months_remaining > months_total:
+                raise HTTPException(status_code=400, detail="installment_plan.months_remaining must be between 0 and months_total")
+
+            installment_payload = {
+                "account_id": transaction_data.get("account_id"),
+                "transaction_id": created.get("id"),
+                "description": data.description,
+                "amount": data.amount,
+                "months_total": months_total,
+                "months_remaining": months_remaining,
+                "has_interest": data.installment_plan.has_interest,
+                "interest_amount_per_month": data.installment_plan.interest_amount_per_month,
+                "purchase_date": data.date,
+                "created_at": now_iso(),
+                "updated_at": now_iso(),
+            }
+            installment_payload = normalize_uuid_inputs(installment_payload, ["account_id", "transaction_id"])
+            store.create_installment(installment_payload)
+
         return Transaction(**normalize_transaction_row(created))
+    except HTTPException:
+        raise
     except Exception as e:
+        if "created" in locals() and created.get("id"):
+            try:
+                store.delete_transaction(created["id"])
+            except Exception:
+                pass
         raise HTTPException(status_code=400, detail=extract_storage_error_message(e))
 
 @app.put("/transactions/{id}", response_model=Transaction)
@@ -1511,6 +1569,7 @@ async def create_installment(data: InstallmentCreate):
         raise HTTPException(status_code=400, detail="purchase_date must be YYYY-MM-DD")
     payload = {
         "account_id": data.account_id,
+        "transaction_id": data.transaction_id,
         "description": data.description,
         "amount": data.amount,
         "months_total": data.months_total,
@@ -1521,6 +1580,7 @@ async def create_installment(data: InstallmentCreate):
         "created_at": now_iso(),
         "updated_at": now_iso(),
     }
+    payload = normalize_uuid_inputs(payload, ["account_id", "transaction_id"])
     created = store.create_installment(payload)
     return Installment(**created)
 
@@ -1530,6 +1590,7 @@ async def update_installment(id: str, data: InstallmentUpdate):
     for key, value in data.dict(exclude_unset=True).items():
         if value is not None:
             updates[key] = value
+    updates = normalize_uuid_inputs(updates, ["account_id", "transaction_id"])
     if "purchase_date" in updates:
         try:
             datetime.strptime(updates["purchase_date"], "%Y-%m-%d")

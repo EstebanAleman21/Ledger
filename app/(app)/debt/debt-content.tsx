@@ -10,8 +10,8 @@ import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { createInstallment, deleteInstallment, getAccounts, getInstallments, updateInstallment } from "@/lib/api"
-import type { Account, Currency, Installment } from "@/lib/types"
+import { createInstallment, createTransaction, deleteInstallment, getAccounts, getCategories, getInstallments, updateInstallment } from "@/lib/api"
+import type { Account, Category, Currency, Installment } from "@/lib/types"
 import { formatCurrency } from "@/lib/utils/format"
 import { cn } from "@/lib/utils"
 import { toast } from "sonner"
@@ -31,6 +31,7 @@ type DebtItem = {
   remainingCredit?: number
   remainingCreditAfterInstallments?: number
   installmentPrincipalRemaining?: number
+  installmentPrincipalRemainingOffLedger?: number
   debtAmount: number
   minPayment: number
 }
@@ -150,6 +151,7 @@ function runSnowball(debts: DebtItem[], extraPayment: number, maxMonths = 600): 
 export function DebtContent() {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [installments, setInstallments] = useState<Installment[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
   const [config, setConfig] = useState<DebtConfig>(() => loadConfig())
   const [selectedCurrency, setSelectedCurrency] = useState<Currency>("MXN")
@@ -167,9 +169,10 @@ export function DebtContent() {
   const loadData = async () => {
     try {
       setLoading(true)
-      const [accs, insts] = await Promise.all([getAccounts(), getInstallments()])
+      const [accs, insts, cats] = await Promise.all([getAccounts(), getInstallments(), getCategories()])
       setAccounts(accs)
       setInstallments(insts)
+      setCategories(cats)
     } catch (error) {
       console.error(error)
       toast.error("Failed to load accounts")
@@ -204,6 +207,7 @@ export function DebtContent() {
           remainingCredit: a.remainingCredit,
           remainingCreditAfterInstallments: a.remainingCreditAfterInstallments,
           installmentPrincipalRemaining: a.installmentPrincipalRemaining,
+          installmentPrincipalRemainingOffLedger: a.installmentPrincipalRemainingOffLedger,
           debtAmount,
           minPayment: config.minPaymentsByAccountId[a.id] ?? 0,
         }
@@ -378,9 +382,9 @@ export function DebtContent() {
                 const rawRemaining =
                   d.remainingCredit ?? (creditLimit === null ? null : creditLimit + d.balance)
                 const installmentPrincipalRemaining =
-                  d.installmentPrincipalRemaining ??
+                  d.installmentPrincipalRemainingOffLedger ??
                   installments
-                    .filter((i) => i.accountId === d.id && i.monthsRemaining > 0)
+                    .filter((i) => i.accountId === d.id && i.monthsRemaining > 0 && !i.transactionId)
                     .reduce((sum, i) => sum + (i.amount / Math.max(1, i.monthsTotal)) * i.monthsRemaining, 0)
                 const remaining =
                   d.remainingCreditAfterInstallments ??
@@ -461,6 +465,7 @@ export function DebtContent() {
         <InstallmentsSection
           installments={installments}
           accounts={accounts}
+          categories={categories}
           selectedCurrency={selectedCurrency}
           onRefresh={loadData}
         />
@@ -472,11 +477,13 @@ export function DebtContent() {
 function InstallmentsSection({
   installments,
   accounts,
+  categories,
   selectedCurrency,
   onRefresh,
 }: {
   installments: Installment[]
   accounts: Account[]
+  categories: Category[]
   selectedCurrency: Currency
   onRefresh: () => void
 }) {
@@ -499,6 +506,10 @@ function InstallmentsSection({
   >("purchase_desc")
 
   const [editingInstallment, setEditingInstallment] = useState<Installment | null>(null)
+  const [backfillInstallment, setBackfillInstallment] = useState<Installment | null>(null)
+  const [backfillCategoryId, setBackfillCategoryId] = useState("")
+  const [backfillNotes, setBackfillNotes] = useState("")
+  const [backfillSaving, setBackfillSaving] = useState(false)
   const [editAccountId, setEditAccountId] = useState("")
   const [editDescription, setEditDescription] = useState("")
   const [editAmount, setEditAmount] = useState("")
@@ -518,6 +529,7 @@ function InstallmentsSection({
     () => installments.filter((i) => accountsById.get(i.accountId)?.currency === selectedCurrency),
     [installments, accountsById, selectedCurrency]
   )
+  const expenseCategories = useMemo(() => categories.filter((c) => c.type !== "income"), [categories])
 
   useEffect(() => {
     if (filterAccountId === "all") return
@@ -592,6 +604,12 @@ function InstallmentsSection({
     setEditPurchaseDate(editingInstallment.purchaseDate)
   }, [editingInstallment])
 
+  useEffect(() => {
+    if (!backfillInstallment) return
+    setBackfillCategoryId("")
+    setBackfillNotes("")
+  }, [backfillInstallment])
+
   const monthlyTotals = useMemo(() => {
     const base = installmentsForCurrency.reduce((sum, i) => sum + i.amount / Math.max(1, i.monthsTotal), 0)
     const interest = installmentsForCurrency.reduce((sum, i) => sum + (i.hasInterest ? i.interestAmountPerMonth : 0), 0)
@@ -654,6 +672,41 @@ function InstallmentsSection({
 
   const handleEdit = (installment: Installment) => {
     setEditingInstallment(installment)
+  }
+
+  const handleBackfill = (installment: Installment) => {
+    setBackfillInstallment(installment)
+  }
+
+  const handleConfirmBackfill = async () => {
+    if (!backfillInstallment) return
+    const account = accountsById.get(backfillInstallment.accountId)
+    if (!account) {
+      toast.error("Account not found for this installment")
+      return
+    }
+    setBackfillSaving(true)
+    try {
+      const created = await createTransaction({
+        type: "expense",
+        date: backfillInstallment.purchaseDate,
+        description: backfillInstallment.description,
+        amount: backfillInstallment.amount,
+        categoryId: backfillCategoryId || "",
+        accountId: backfillInstallment.accountId,
+        currency: account.currency,
+        notes: backfillNotes || undefined,
+      })
+      await updateInstallment(backfillInstallment.id, { transactionId: created.id })
+      toast.success("Transaction created and linked")
+      setBackfillInstallment(null)
+      onRefresh()
+    } catch (error) {
+      console.error(error)
+      toast.error("Failed to backfill transaction")
+    } finally {
+      setBackfillSaving(false)
+    }
   }
 
   const handleSaveEdit = async () => {
@@ -769,6 +822,54 @@ function InstallmentsSection({
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!backfillInstallment} onOpenChange={(open) => !open && setBackfillInstallment(null)}>
+        <DialogContent className="max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Backfill transaction</DialogTitle>
+          </DialogHeader>
+          {backfillInstallment && (
+            <div className="space-y-4">
+              <div className="rounded-lg border border-border bg-card p-3 text-sm space-y-1">
+                <div className="font-medium">{backfillInstallment.description}</div>
+                <div className="text-muted-foreground">
+                  {accountsById.get(backfillInstallment.accountId)?.name || "Unknown account"} • {backfillInstallment.purchaseDate}
+                </div>
+                <div className="text-muted-foreground">
+                  Amount: {formatCurrency(backfillInstallment.amount, selectedCurrency)}
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Category (optional)</Label>
+                <Select value={backfillCategoryId} onValueChange={setBackfillCategoryId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {expenseCategories.map((cat) => (
+                      <SelectItem key={cat.id} value={cat.id}>
+                        {cat.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Notes (optional)</Label>
+                <Input value={backfillNotes} onChange={(e) => setBackfillNotes(e.target.value)} placeholder="Optional notes" />
+              </div>
+              <div className="flex gap-2">
+                <Button variant="outline" className="bg-transparent flex-1" onClick={() => setBackfillInstallment(null)}>
+                  Cancel
+                </Button>
+                <Button className="flex-1" onClick={handleConfirmBackfill} disabled={backfillSaving}>
+                  {backfillSaving ? "Creating..." : "Create transaction"}
+                </Button>
+              </div>
+            </div>
+          )}
         </DialogContent>
       </Dialog>
 
@@ -1020,6 +1121,11 @@ function InstallmentsSection({
                   <TableCell className="text-right tabular-nums">{i.purchaseDate}</TableCell>
                   <TableCell className="text-right">
                     <div className="flex justify-end gap-2">
+                      {!i.transactionId && (
+                        <Button variant="outline" className="bg-transparent" size="sm" onClick={() => handleBackfill(i)}>
+                          Backfill
+                        </Button>
+                      )}
                       <Button variant="outline" className="bg-transparent" size="sm" onClick={() => handleEdit(i)}>
                         Edit
                       </Button>

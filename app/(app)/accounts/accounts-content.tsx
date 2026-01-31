@@ -278,10 +278,12 @@ export function AccountsContent() {
             const availableCredit =
               account.remainingCredit ?? (isCredit && creditLimit !== null ? creditLimit + account.balance : null)
             const installmentPrincipalRemaining = account.installmentPrincipalRemaining ?? 0
+            const installmentPrincipalRemainingOffLedger =
+              account.installmentPrincipalRemainingOffLedger ?? installmentPrincipalRemaining
             const availableAfterInstallments =
               account.remainingCreditAfterInstallments ??
-              (availableCredit === null ? null : availableCredit - installmentPrincipalRemaining)
-            const effectiveBalance = isCredit ? account.balance - installmentPrincipalRemaining : account.balance
+              (availableCredit === null ? null : availableCredit - installmentPrincipalRemainingOffLedger)
+            const effectiveBalance = isCredit ? account.balance - installmentPrincipalRemainingOffLedger : account.balance
             const spentThisCycle = spentThisCycleByAccountId.get(account.id)
 
             return (
@@ -432,10 +434,12 @@ export function AccountsContent() {
                       const creditLimit = coerceNumber(selectedAccount.creditLimit) as number
                       const remainingCredit = selectedAccount.remainingCredit ?? creditLimit + selectedAccount.balance
                       const installmentPrincipalRemaining = selectedAccount.installmentPrincipalRemaining ?? 0
+                      const installmentPrincipalRemainingOffLedger =
+                        selectedAccount.installmentPrincipalRemainingOffLedger ?? installmentPrincipalRemaining
                       const remainingAfter =
                         selectedAccount.remainingCreditAfterInstallments ??
-                        remainingCredit - installmentPrincipalRemaining
-                      const effectiveBalance = selectedAccount.balance - installmentPrincipalRemaining
+                        remainingCredit - installmentPrincipalRemainingOffLedger
+                      const effectiveBalance = selectedAccount.balance - installmentPrincipalRemainingOffLedger
 
                       return (
                         <>

@@ -57,7 +57,7 @@ EXPORT_COLUMNS = {
                      'created_at', 'updated_at'],
     'export_settings': ['key', 'value'],
     'export_rules': ['id', 'category_id', 'field', 'operator', 'value', 'created_at', 'updated_at'],
-    'export_installments': ['id', 'account_id', 'description', 'amount', 'months_total', 'months_remaining',
+    'export_installments': ['id', 'account_id', 'transaction_id', 'description', 'amount', 'months_total', 'months_remaining',
                             'has_interest', 'interest_amount_per_month', 'purchase_date', 'created_at', 'updated_at'],
     'export_debt_accounts': ['account_id', 'account_name', 'currency', 'balance', 'debt_amount', 'credit_limit',
                              'remaining_credit', 'installment_monthly_expected', 'installment_remaining_balance',

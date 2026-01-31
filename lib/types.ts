@@ -15,6 +15,7 @@ export interface Account {
   statementDay?: number
   remainingCredit?: number
   installmentPrincipalRemaining?: number
+  installmentPrincipalRemainingOffLedger?: number
   remainingCreditAfterInstallments?: number
   color: string
   icon: string
@@ -51,6 +52,7 @@ export interface Transaction {
   needsReview: boolean
   createdAt: string
   updatedAt: string
+  installmentPlan?: InstallmentPlan
 }
 
 export interface Budget {
@@ -88,6 +90,7 @@ export interface CategoryRule {
 export interface Installment {
   id: string
   accountId: string
+  transactionId?: string
   description: string
   amount: number
   monthsTotal: number
@@ -97,6 +100,13 @@ export interface Installment {
   purchaseDate: string
   createdAt: string
   updatedAt: string
+}
+
+export interface InstallmentPlan {
+  monthsTotal: number
+  monthsRemaining?: number
+  hasInterest?: boolean
+  interestAmountPerMonth?: number
 }
 
 export interface SyncStatus {

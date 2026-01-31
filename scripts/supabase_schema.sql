@@ -92,6 +92,7 @@ create table if not exists settings (
 create table if not exists installments (
   id uuid primary key default gen_random_uuid(),
   account_id uuid not null references accounts(id) on delete restrict,
+  transaction_id uuid references transactions(id) on delete set null,
   description text not null,
   amount numeric not null,
   months_total integer not null check (months_total > 0),
@@ -104,3 +105,4 @@ create table if not exists installments (
 );
 
 create index if not exists installments_account_id_idx on installments(account_id);
+create index if not exists installments_transaction_id_idx on installments(transaction_id);
